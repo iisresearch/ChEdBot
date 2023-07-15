@@ -1,0 +1,5 @@
+chainlit
+langchain
+sentence_transformers
+chromadb
+openpyxl
