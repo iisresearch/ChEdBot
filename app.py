@@ -93,8 +93,7 @@ def get_retriever(context_state: str, vectordb):
 
 @cl.langchain_factory(use_async=True)
 def factory():
-    if "OPENAI_API_KEY" not in os.environ:
-        os.environ["OPENAI_API_KEY"] = cl.user_session.get("env").get("OPENAI_API_KEY")
+    #if "OPENAI_API_KEY" not in os.environ:   
     df_agent = load_agent()
     load_vectordb()
     user_session.set("context_state", "")
@@ -119,6 +118,7 @@ def factory():
         model_name=llm_settings.model_name,
         temperature=llm_settings.temperature,
         streaming=True,
+        openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY") if "OPENAI_API_KEY" not in os.environ else None
     )
 
     default_prompt = """{History}
