@@ -1,7 +1,7 @@
 [project]
 # If true (default), the app will be available to anonymous users.
 # If false, users will need to authenticate and be part of the project to use the app.
-public = false
+public = true
 
 # The project ID (found on https://cloud.chainlit.io).
 # The project ID is required when public is set to false or when using the cloud database.
@@ -17,7 +17,7 @@ id = "ChEdBot-ZEfU7QTMoLeq"
 enable_telemetry = false
 
 # List of environment variables to be provided by each user to use the app.
-user_env = []
+user_env = ["OPENAI_API_KEY"]
 
 [UI]
 # Name of the app and chatbot.
