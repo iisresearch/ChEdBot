@@ -5,8 +5,7 @@ RUN useradd -m -u 1000 user
 USER user
 
 ENV HOME=/home/user \
-	PATH=/home/user/.local/bin:$PATH \
-    PYTHONPATH=$HOME/app \
+    PATH=/home/user/.local/bin:$PATH
 
 WORKDIR $HOME/app
 
