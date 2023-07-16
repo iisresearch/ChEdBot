@@ -93,7 +93,6 @@ def get_retriever(context_state: str, vectordb):
 
 @cl.langchain_factory(use_async=True)
 def factory():
-    #if "OPENAI_API_KEY" not in os.environ:   
     df_agent = load_agent()
     load_vectordb()
     user_session.set("context_state", "")
