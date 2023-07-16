@@ -51,7 +51,7 @@ def init_embedding_function():
     return HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-mpnet-base-v2",
         encode_kwargs={"normalize_embeddings": True},
-        cache_folder=EMBEDDING_MODEL_FOLDER,
+        #cache_folder=EMBEDDING_MODEL_FOLDER,
     )
 
 
