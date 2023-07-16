@@ -3,6 +3,7 @@ import pandas as pd
 import chainlit as cl
 from chainlit import user_session
 from chainlit.types import LLMSettings
+from chainlit.logger import logger
 from langchain import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.llms import AzureOpenAI
@@ -13,7 +14,8 @@ from langchain.vectorstores import Chroma
 from langchain.vectorstores.base import VectorStoreRetriever
 
 
-current_agent = os.environ["AGENT"]
+current_agent = os.environ["AGENT_SHEET"]
+vectordb = None
 
 
 def load_dialogues():
@@ -28,10 +30,8 @@ def load_persona():
     return df.astype(str)
 
 
-def load_prompt_engineering():
-    df = pd.read_excel(
-        os.environ["PROMPT_ENGINEERING_SHEET"], header=0, keep_default_na=False
-    )
+def load_prompts():
+    df = pd.read_excel(os.environ["PROMPT_SHEET"], header=0, keep_default_na=False)
     df = df[df["Agent"] == current_agent]
     return df.astype(str)
 
@@ -50,20 +50,25 @@ def init_embedding_function():
 
 
 def load_vectordb(init: bool = False):
-    vectordb = None
+    global vectordb
     VECTORDB_FOLDER = ".vectordb"
-    if not init:
+    if not init and vectordb is None:
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
             persist_directory=VECTORDB_FOLDER,
         )
-    if init or not vectordb.get()["ids"]:
+        if not vectordb.get()["ids"]:
+            init = True
+        else:
+            logger.info(f"Vector DB loaded")
+    if init:
         vectordb = Chroma.from_documents(
             documents=load_documents(load_dialogues(), page_content_column="Utterance"),
             embedding=init_embedding_function(),
             persist_directory=VECTORDB_FOLDER,
         )
         vectordb.persist()
+        logger.info(f"Vector DB initialised")
     return vectordb
 
 
@@ -80,17 +85,15 @@ def get_retriever(context_state: str, vectordb):
     )
 
 
-vectordb = load_vectordb()
-
-
 @cl.langchain_factory(use_async=True)
 def factory():
-    df_prompt_engineering = load_prompt_engineering()
+    load_vectordb()
+    df_prompts = load_prompts()
     user_session.set("context_state", "")
 
     llm_settings = LLMSettings(
         model_name="text-davinci-003",
-        temperature=df_prompt_engineering["Temperature"].values[0],
+        temperature=df_prompts["Temperature"].values[0],
     )
     user_session.set("llm_settings", llm_settings)
 
@@ -101,14 +104,12 @@ def factory():
         streaming=True,
     )
 
-    utterance_prompt = PromptTemplate.from_template(
-        df_prompt_engineering["Utterance-Prompt"].values[0]
-    )
+    utterance_prompt = PromptTemplate.from_template(df_prompts["Template"].values[0])
 
     chat_memory = ConversationBufferWindowMemory(
         memory_key="History",
         input_key="Utterance",
-        k=df_prompt_engineering["History"].values[0],
+        k=df_prompts["History"].values[0],
     )
 
     utterance_chain = LLMChain(
@@ -118,9 +119,7 @@ def factory():
         memory=chat_memory,
     )
 
-    continuation_prompt = PromptTemplate.from_template(
-        df_prompt_engineering["Continuation-Prompt"].values[0]
-    )
+    continuation_prompt = PromptTemplate.from_template(df_prompts["Template"].values[1])
 
     continuation_chain = LLMChain(
         prompt=continuation_prompt,
@@ -139,52 +138,52 @@ async def run(agent, input_str):
     global vectordb
     if input_str == "/reload":
         vectordb = load_vectordb(True)
-        await cl.Message(content="Data loaded").send()
-    else:
-        df_persona = load_persona()
+        return await cl.Message(content="Data loaded").send()
 
-        retriever = get_retriever(user_session.get("context_state"), vectordb)
+    df_persona = load_persona()
 
-        document = retriever.get_relevant_documents(query=input_str)
+    retriever = get_retriever(user_session.get("context_state"), vectordb)
 
-        response = await agent.acall(
+    document = retriever.get_relevant_documents(query=input_str)
+
+    response = await agent.acall(
+        {
+            "Persona": df_persona.loc[df_persona["AI"] == document[0].metadata["AI"]][
+                "Persona"
+            ].values[0],
+            "Utterance": input_str,
+            "Response": document[0].metadata["Response"],
+        },
+        callbacks=[cl.AsyncLangchainCallbackHandler()],
+    )
+    await cl.Message(
+        content=response["text"],
+        author=document[0].metadata["AI"],
+        llm_settings=user_session.get("llm_settings"),
+    ).send()
+    user_session.set("context_state", document[0].metadata["Contextualisation"])
+    continuation = document[0].metadata["Continuation"]
+
+    while continuation != "":
+        document_continuation = vectordb.get(where={"Intent": continuation})
+        continuation_chain = user_session.get("continuation_chain")
+        response = await continuation_chain.acall(
             {
                 "Persona": df_persona.loc[
-                    df_persona["AI"] == document[0].metadata["AI"]
+                    df_persona["AI"] == document_continuation["metadatas"][0]["AI"]
                 ]["Persona"].values[0],
-                "Utterance": input_str,
-                "Response": document[0].metadata["Response"],
+                "Utterance": "",
+                "Response": document_continuation["metadatas"][0]["Response"],
             },
             callbacks=[cl.AsyncLangchainCallbackHandler()],
         )
         await cl.Message(
             content=response["text"],
-            author=document[0].metadata["AI"],
+            author=document_continuation["metadatas"][0]["AI"],
             llm_settings=user_session.get("llm_settings"),
         ).send()
-        user_session.set("context_state", document[0].metadata["Contextualisation"])
-        continuation = document[0].metadata["Continuation"]
-
-        while continuation != "":
-            document_continuation = vectordb.get(where={"Intent": continuation})
-            continuation_chain = user_session.get("continuation_chain")
-            response = await continuation_chain.acall(
-                {
-                    "Persona": df_persona.loc[
-                        df_persona["AI"] == document_continuation["metadatas"][0]["AI"]
-                    ]["Persona"].values[0],
-                    "Utterance": "",
-                    "Response": document_continuation["metadatas"][0]["Response"],
-                },
-                callbacks=[cl.AsyncLangchainCallbackHandler()],
-            )
-            await cl.Message(
-                content=response["text"],
-                author=document_continuation["metadatas"][0]["AI"],
-                llm_settings=user_session.get("llm_settings"),
-            ).send()
-            user_session.set(
-                "context_state",
-                document_continuation["metadatas"][0]["Contextualisation"],
-            )
-            continuation = document_continuation["metadatas"][0]["Continuation"]
+        user_session.set(
+            "context_state",
+            document_continuation["metadatas"][0]["Contextualisation"],
+        )
+        continuation = document_continuation["metadatas"][0]["Continuation"]
