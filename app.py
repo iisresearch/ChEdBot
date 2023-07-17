@@ -1,4 +1,5 @@
 import os
+import time
 import pandas as pd
 import chainlit as cl
 from chainlit import user_session
@@ -51,7 +52,7 @@ def init_embedding_function():
     return HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-mpnet-base-v2",
         encode_kwargs={"normalize_embeddings": True},
-        #cache_folder=EMBEDDING_MODEL_FOLDER,
+        # cache_folder=EMBEDDING_MODEL_FOLDER,
     )
 
 
@@ -91,6 +92,20 @@ def get_retriever(context_state: str, vectordb):
     )
 
 
+async def sendMessageNoLLM(content: str, author: str):
+    msg = cl.Message(
+        content="",
+        author=author,
+    )
+    tokens = content.split()
+    for i, token in enumerate(tokens):
+        time.sleep(0.1)
+        await msg.stream_token(token)
+        if i < len(tokens) - 1:
+            await msg.stream_token(" ")
+    await msg.send()
+
+
 @cl.langchain_factory(use_async=True)
 def factory():
     df_agent = load_agent()
@@ -117,7 +132,9 @@ def factory():
         model_name=llm_settings.model_name,
         temperature=llm_settings.temperature,
         streaming=True,
-        openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY") if "OPENAI_API_KEY" not in os.environ else None
+        openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY")
+        if "OPENAI_API_KEY" not in os.environ
+        else None,
     )
 
     default_prompt = """{History}
@@ -153,10 +170,9 @@ async def run(agent, input_str):
 
     prompt = document[0].metadata["Prompt"]
     if not prompt:
-        await cl.Message(
-            content=document[0].metadata["Response"],
-            author=document[0].metadata["Role"],
-        ).send()
+        await sendMessageNoLLM(
+            document[0].metadata["Response"], document[0].metadata["Role"]
+        )
     else:
         agent.prompt = PromptTemplate.from_template(
             df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
@@ -190,10 +206,10 @@ async def run(agent, input_str):
 
         prompt = document_continuation["metadatas"][0]["Prompt"]
         if not prompt:
-            await cl.Message(
-                content=document_continuation["metadatas"][0]["Response"],
-                author=document_continuation["metadatas"][0]["Role"],
-            ).send()
+            await sendMessageNoLLM(
+                document_continuation["metadatas"][0]["Response"],
+                document_continuation["metadatas"][0]["Role"],
+            )
         else:
             agent.prompt = PromptTemplate.from_template(
                 df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
