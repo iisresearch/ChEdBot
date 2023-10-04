@@ -113,7 +113,8 @@ def factory():
     user_session.set("df_prompts", load_prompts())
     user_session.set("df_persona", load_persona())
     user_session.set("variable_storage", VariableStorage())
-    user_session.get("variable_storage").add("Name", "Andreas")
+    user_session.set("variable_request", "")
+    user_session.set("variable_request_continuation", "")
 
     chat_memory = ConversationBufferWindowMemory(
         memory_key="History",
@@ -163,44 +164,66 @@ async def run(message: str):
     df_persona = user_session.get("df_persona")
     agent = user_session.get("llm_chain")
 
-    retriever = get_retriever(
-        user_session.get("context_state"), user_session.get("score_threshold"), vectordb
-    )
-    document = retriever.get_relevant_documents(query=message)
-
-    if len(document) == 1:
-        user_session.set("fallback_intent", document[0].metadata["Fallback"])
-        user_session.set("context_state", document[0].metadata["Contextualisation"])
-        continuation = document[0].metadata["Continuation"]
-        prompt = document[0].metadata["Prompt"]
-        if not prompt:
-            await sendMessageNoLLM(
-                user_session.get("variable_storage").replace(document[0].metadata["Response"]), document[0].metadata["Role"]
-            )
-        else:
-            agent.prompt = PromptTemplate.from_template(
-                df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
-            )
-            agent.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
-                "Temperature"
-            ].values[0]
-
-            response = await agent.acall(
-                {
-                    "Persona": df_persona.loc[
-                        df_persona["Role"] == document[0].metadata["Role"]
-                    ]["Persona"].values[0],
-                    "Utterance": message,
-                    "Response": user_session.get("variable_storage").replace(document[0].metadata["Response"]),
-                },
-                callbacks=[cl.AsyncLangchainCallbackHandler()],
-            )
-            await cl.Message(
-                content=response["text"],
-                author=document[0].metadata["Role"],
-            ).send()
+    if (user_session.get("variable_request")) != "":
+        continuation = user_session.get("variable_request_continuation")
+        user_session.get("variable_storage").add(
+            user_session.get("variable_request"), message
+        )
     else:
-        continuation = user_session.get("fallback_intent")
+        retriever = get_retriever(
+            user_session.get("context_state"),
+            user_session.get("score_threshold"),
+            vectordb,
+        )
+        document = retriever.get_relevant_documents(query=message)
+
+        if len(document) == 1:
+            user_session.set("context_state", document[0].metadata["Contextualisation"])
+            user_session.set("fallback_intent", document[0].metadata["Fallback"])
+            user_session.set("variable_request", document[0].metadata["Variable"])
+            print("variable_request", user_session.get("variable_request"))
+            if (user_session.get("variable_request")) == "":
+                continuation = document[0].metadata["Continuation"]
+            else:
+                continuation = ""
+                user_session.set(
+                    "variable_request_continuation",
+                    document[0].metadata["Continuation"],
+                )
+            prompt = document[0].metadata["Prompt"]
+            if not prompt:
+                await sendMessageNoLLM(
+                    user_session.get("variable_storage").replace(
+                        document[0].metadata["Response"]
+                    ),
+                    document[0].metadata["Role"],
+                )
+            else:
+                agent.prompt = PromptTemplate.from_template(
+                    df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
+                )
+                agent.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
+                    "Temperature"
+                ].values[0]
+
+                response = await agent.acall(
+                    {
+                        "Persona": df_persona.loc[
+                            df_persona["Role"] == document[0].metadata["Role"]
+                        ]["Persona"].values[0],
+                        "Utterance": message,
+                        "Response": user_session.get("variable_storage").replace(
+                            document[0].metadata["Response"]
+                        ),
+                    },
+                    callbacks=[cl.AsyncLangchainCallbackHandler()],
+                )
+                await cl.Message(
+                    content=response["text"],
+                    author=document[0].metadata["Role"],
+                ).send()
+        else:
+            continuation = user_session.get("fallback_intent")
 
     while continuation != "":
         document_continuation = vectordb.get(where={"Intent": continuation})
@@ -208,7 +231,9 @@ async def run(message: str):
         prompt = document_continuation["metadatas"][0]["Prompt"]
         if not prompt:
             await sendMessageNoLLM(
-                user_session.get("variable_storage").replace(document_continuation["metadatas"][0]["Response"]),
+                user_session.get("variable_storage").replace(
+                    document_continuation["metadatas"][0]["Response"]
+                ),
                 document_continuation["metadatas"][0]["Role"],
             )
         else:
@@ -226,7 +251,9 @@ async def run(message: str):
                         == document_continuation["metadatas"][0]["Role"]
                     ]["Persona"].values[0],
                     "Utterance": "",
-                    "Response": user_session.get("variable_storage").replace(document_continuation["metadatas"][0]["Response"]),
+                    "Response": user_session.get("variable_storage").replace(
+                        document_continuation["metadatas"][0]["Response"]
+                    ),
                 },
                 callbacks=[cl.AsyncLangchainCallbackHandler()],
             )
@@ -241,7 +268,17 @@ async def run(message: str):
         user_session.set(
             "fallback_intent", document_continuation["metadatas"][0]["Fallback"]
         )
-        continuation = document_continuation["metadatas"][0]["Continuation"]
+        user_session.set(
+            "variable_request", document_continuation["metadatas"][0]["Variable"]
+        )
+        if (user_session.get("variable_request")) == "":
+            continuation = document_continuation["metadatas"][0]["Continuation"]
+        else:
+            continuation = ""
+            user_session.set(
+                "variable_request_continuation",
+                document_continuation["metadatas"][0]["Continuation"],
+            )
 
 
 class VariableStorage:
@@ -257,4 +294,3 @@ class VariableStorage:
     def iterate(self):
         for name, value in self.variables.items():
             yield name, value
-            
