@@ -9,7 +9,7 @@ from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.llms import AzureOpenAI
 from langchain.document_loaders import DataFrameLoader
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.embeddings import OpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.vectorstores import Chroma
 from langchain.vectorstores.base import VectorStoreRetriever
@@ -48,12 +48,7 @@ def load_documents(df, page_content_column: str):
 
 
 def init_embedding_function():
-    EMBEDDING_MODEL_FOLDER = ".embedding-model"
-    return HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-mpnet-base-v2",
-        encode_kwargs={"normalize_embeddings": True},
-        # cache_folder=EMBEDDING_MODEL_FOLDER,
-    )
+    return OpenAIEmbeddings(deployment="text-embedding-ada-002")
 
 
 def load_vectordb(init: bool = False):
@@ -110,7 +105,7 @@ async def sendMessageNoLLM(content: str, author: str):
 def factory():
     df_agent = load_agent()
     load_vectordb()
-    user_session.set("context_state", "")
+    user_session.set("context_state", df_agent["Context"].values[0])
     user_session.set("df_prompts", load_prompts())
     user_session.set("df_persona", load_persona())
 
