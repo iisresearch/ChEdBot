@@ -112,6 +112,8 @@ def factory():
     user_session.set("score_threshold", df_agent["Threshold"].values[0])
     user_session.set("df_prompts", load_prompts())
     user_session.set("df_persona", load_persona())
+    user_session.set("variable_storage", VariableStorage())
+    user_session.get("variable_storage").add("Name", "Andreas")
 
     chat_memory = ConversationBufferWindowMemory(
         memory_key="History",
@@ -173,7 +175,7 @@ async def run(message: str):
         prompt = document[0].metadata["Prompt"]
         if not prompt:
             await sendMessageNoLLM(
-                document[0].metadata["Response"], document[0].metadata["Role"]
+                user_session.get("variable_storage").replace(document[0].metadata["Response"]), document[0].metadata["Role"]
             )
         else:
             agent.prompt = PromptTemplate.from_template(
@@ -189,7 +191,7 @@ async def run(message: str):
                         df_persona["Role"] == document[0].metadata["Role"]
                     ]["Persona"].values[0],
                     "Utterance": message,
-                    "Response": document[0].metadata["Response"],
+                    "Response": user_session.get("variable_storage").replace(document[0].metadata["Response"]),
                 },
                 callbacks=[cl.AsyncLangchainCallbackHandler()],
             )
@@ -206,7 +208,7 @@ async def run(message: str):
         prompt = document_continuation["metadatas"][0]["Prompt"]
         if not prompt:
             await sendMessageNoLLM(
-                document_continuation["metadatas"][0]["Response"],
+                user_session.get("variable_storage").replace(document_continuation["metadatas"][0]["Response"]),
                 document_continuation["metadatas"][0]["Role"],
             )
         else:
@@ -224,7 +226,7 @@ async def run(message: str):
                         == document_continuation["metadatas"][0]["Role"]
                     ]["Persona"].values[0],
                     "Utterance": "",
-                    "Response": document_continuation["metadatas"][0]["Response"],
+                    "Response": user_session.get("variable_storage").replace(document_continuation["metadatas"][0]["Response"]),
                 },
                 callbacks=[cl.AsyncLangchainCallbackHandler()],
             )
@@ -240,3 +242,19 @@ async def run(message: str):
             "fallback_intent", document_continuation["metadatas"][0]["Fallback"]
         )
         continuation = document_continuation["metadatas"][0]["Continuation"]
+
+
+class VariableStorage:
+    def __init__(self):
+        self.variables = {}
+
+    def add(self, name, value):
+        self.variables[name] = value
+
+    def replace(self, text):
+        return text.format(**self.variables)
+
+    def iterate(self):
+        for name, value in self.variables.items():
+            yield name, value
+            
