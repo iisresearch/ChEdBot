@@ -1,5 +1,8 @@
+pandas
+chromadb
 chainlit
 langchain
+openai
 sentence_transformers
-chromadb
 openpyxl
+tiktoken

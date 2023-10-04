@@ -3,9 +3,9 @@ import time
 import pandas as pd
 import chainlit as cl
 from chainlit import user_session
-from chainlit.types import LLMSettings
+#from chainlit.types import LLMSettings
 from chainlit.logger import logger
-from langchain import LLMChain
+from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.llms import AzureOpenAI
 from langchain.document_loaders import DataFrameLoader
@@ -106,19 +106,13 @@ async def sendMessageNoLLM(content: str, author: str):
     await msg.send()
 
 
-@cl.langchain_factory(use_async=True)
+@cl.on_chat_start
 def factory():
     df_agent = load_agent()
     load_vectordb()
     user_session.set("context_state", "")
     user_session.set("df_prompts", load_prompts())
     user_session.set("df_persona", load_persona())
-
-    llm_settings = LLMSettings(
-        model_name="text-davinci-003",
-        temperature=0.7,
-    )
-    user_session.set("llm_settings", llm_settings)
 
     chat_memory = ConversationBufferWindowMemory(
         memory_key="History",
@@ -129,8 +123,8 @@ def factory():
 
     llm = AzureOpenAI(
         deployment_name="davinci003",
-        model_name=llm_settings.model_name,
-        temperature=llm_settings.temperature,
+        model_name="text-davinci-003",
+        temperature=0.7,
         streaming=True,
         openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY")
         if "OPENAI_API_KEY" not in os.environ
@@ -146,27 +140,27 @@ def factory():
     ##
     AI:"""
 
-    return LLMChain(
+    user_session.set("llm_chain", LLMChain(
         prompt=PromptTemplate.from_template(default_prompt),
         llm=llm,
         verbose=True,
         memory=chat_memory,
-    )
+    ))
 
 
-@cl.langchain_run
-async def run(agent, input_str):
+@cl.on_message
+async def run(message: str):
     global vectordb
-    if input_str == "/reload":
+    if message == "/reload":
         vectordb = load_vectordb(True)
         return await cl.Message(content="Data loaded").send()
 
     df_prompts = user_session.get("df_prompts")
     df_persona = user_session.get("df_persona")
-    llm_settings = user_session.get("llm_settings")
+    agent = user_session.get("llm_chain")
 
     retriever = get_retriever(user_session.get("context_state"), vectordb)
-    document = retriever.get_relevant_documents(query=input_str)
+    document = retriever.get_relevant_documents(query=message)
 
     prompt = document[0].metadata["Prompt"]
     if not prompt:
@@ -177,17 +171,16 @@ async def run(agent, input_str):
         agent.prompt = PromptTemplate.from_template(
             df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
         )
-        llm_settings.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
+        agent.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
             "Temperature"
         ].values[0]
-        agent.llm.temperature = llm_settings.temperature
 
         response = await agent.acall(
             {
                 "Persona": df_persona.loc[
                     df_persona["Role"] == document[0].metadata["Role"]
                 ]["Persona"].values[0],
-                "Utterance": input_str,
+                "Utterance": message,
                 "Response": document[0].metadata["Response"],
             },
             callbacks=[cl.AsyncLangchainCallbackHandler()],
@@ -195,7 +188,6 @@ async def run(agent, input_str):
         await cl.Message(
             content=response["text"],
             author=document[0].metadata["Role"],
-            llm_settings=llm_settings,
         ).send()
 
     user_session.set("context_state", document[0].metadata["Contextualisation"])
@@ -214,10 +206,9 @@ async def run(agent, input_str):
             agent.prompt = PromptTemplate.from_template(
                 df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
             )
-            llm_settings.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
+            agent.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
                 "Temperature"
             ].values[0]
-            agent.llm.temperature = llm_settings.temperature
 
             response = await agent.acall(
                 {
@@ -233,7 +224,6 @@ async def run(agent, input_str):
             await cl.Message(
                 content=response["text"],
                 author=document_continuation["metadatas"][0]["Role"],
-                llm_settings=llm_settings,
             ).send()
         user_session.set(
             "context_state",
