@@ -3,6 +3,5 @@ chromadb
 chainlit
 langchain
 openai
-sentence_transformers
 openpyxl
 tiktoken

@@ -4,6 +4,7 @@ import pandas as pd
 import chainlit as cl
 from chainlit import user_session
 from chainlit.logger import logger
+from chainlit.input_widget import TextInput
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.llms import AzureOpenAI
@@ -12,35 +13,28 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.vectorstores import Chroma
 from langchain.vectorstores.base import VectorStoreRetriever
+from chainlit.playground.config import add_llm_provider
+from chainlit.playground.providers import AzureOpenAI as AzureOpenAIProvider
 from chromadb.config import Settings
 
 
-current_agent = "Demo"
 vectordb = None
 
 
 def load_agent():
-    df = pd.read_excel(os.environ["AGENT_SHEET"], header=0, keep_default_na=False)
-    df = df[df["Agent"] == current_agent]
-    return df
+    return pd.read_excel(os.environ["AGENT_SHEET"], header=0, keep_default_na=False)
 
 
 def load_dialogues():
-    df = pd.read_excel(os.environ["DIALOGUE_SHEET"], header=0, keep_default_na=False)
-    df = df[df["Agent"] == current_agent]
-    return df.astype(str)
+    return pd.read_excel(os.environ["DIALOGUE_SHEET"], header=0, keep_default_na=False).astype(str)
 
 
 def load_persona():
-    df = pd.read_excel(os.environ["PERSONA_SHEET"], header=0, keep_default_na=False)
-    df = df[df["Agent"] == current_agent]
-    return df
+    return pd.read_excel(os.environ["PERSONA_SHEET"], header=0, keep_default_na=False)
 
 
 def load_prompts():
-    df = pd.read_excel(os.environ["PROMPT_SHEET"], header=0, keep_default_na=False)
-    df = df[df["Agent"] == current_agent]
-    return df
+    return pd.read_excel(os.environ["PROMPT_SHEET"], header=0, keep_default_na=False)
 
 
 def load_documents(df, page_content_column: str):
@@ -82,7 +76,15 @@ def get_retriever(context_state: str, score_threshold: str, vectordb):
         search_type="similarity_score_threshold",
         search_kwargs={
             "filter": {
-                "$or": [{"Context": {"$eq": ""}}, {"Context": {"$eq": context_state}}]
+                "$and": [
+                    {
+                        "$or": [
+                            {"Context": {"$eq": ""}},
+                            {"Context": {"$eq": context_state}}
+                        ]
+                    },
+                    {"Agent": {"$eq": user_session.get("current_agent")}}
+                ]
             },
             "k": 1,
             "score_threshold": score_threshold,
@@ -105,11 +107,17 @@ async def sendMessageNoLLM(content: str, author: str):
 
 
 @cl.on_chat_start
-def factory():
+async def factory():
+    user_session.set("current_agent", "Kryptowerk")
+    await cl.ChatSettings(
+        [
+            TextInput(id="Agent", label="Agent", initial="Kryptowerk"),
+        ]
+    ).send()
     df_agent = load_agent()
     load_vectordb()
-    user_session.set("context_state", df_agent["Context"].values[0])
-    user_session.set("score_threshold", df_agent["Threshold"].values[0])
+    user_session.set("context_state", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
+    user_session.set("score_threshold", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
     user_session.set("df_prompts", load_prompts())
     user_session.set("df_persona", load_persona())
     user_session.set("variable_storage", VariableStorage())
@@ -152,6 +160,7 @@ def factory():
         ),
     )
 
+    add_llm_provider(AzureOpenAIProvider)
 
 @cl.on_message
 async def run(message: str):
@@ -181,7 +190,6 @@ async def run(message: str):
             user_session.set("context_state", document[0].metadata["Contextualisation"])
             user_session.set("fallback_intent", document[0].metadata["Fallback"])
             user_session.set("variable_request", document[0].metadata["Variable"])
-            print("variable_request", user_session.get("variable_request"))
             if (user_session.get("variable_request")) == "":
                 continuation = document[0].metadata["Continuation"]
             else:
@@ -280,6 +288,9 @@ async def run(message: str):
                 document_continuation["metadatas"][0]["Continuation"],
             )
 
+@cl.on_settings_update
+async def setup_agent(settings):
+    user_session.set("current_agent", settings["Agent"])
 
 class VariableStorage:
     def __init__(self):
