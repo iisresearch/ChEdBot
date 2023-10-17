@@ -26,7 +26,11 @@ def load_agent():
 
 
 def load_dialogues():
+<<<<<<< HEAD
     return pd.read_excel(os.environ["DIALOGUE_SHEET"], header=0, keep_default_na=False).astype(str)
+=======
+    return pd.read_excel(os.environ["DIALOGUE_SHEET"], header=0, keep_default_na=False)
+>>>>>>> ef5968ef28eda9a2f596b0e32f29eec7eceeaba8
 
 
 def load_persona():
@@ -83,7 +87,11 @@ def get_retriever(context_state: str, score_threshold: str, vectordb):
                             {"Context": {"$eq": context_state}}
                         ]
                     },
+<<<<<<< HEAD
                     {"Agent": {"$eq": user_session.get("current_agent")}}
+=======
+                    {"Agent": {"$eq": current_agent}}
+>>>>>>> ef5968ef28eda9a2f596b0e32f29eec7eceeaba8
                 ]
             },
             "k": 1,
@@ -108,10 +116,16 @@ async def sendMessageNoLLM(content: str, author: str):
 
 @cl.on_chat_start
 async def factory():
+<<<<<<< HEAD
     user_session.set("current_agent", "Kryptowerk")
     await cl.ChatSettings(
         [
             TextInput(id="Agent", label="Agent", initial="Kryptowerk"),
+=======
+    await cl.ChatSettings(
+        [
+            TextInput(id="Agent", label="Agent", initial="Demo"),
+>>>>>>> ef5968ef28eda9a2f596b0e32f29eec7eceeaba8
         ]
     ).send()
     df_agent = load_agent()
@@ -291,6 +305,11 @@ async def run(message: str):
 @cl.on_settings_update
 async def setup_agent(settings):
     user_session.set("current_agent", settings["Agent"])
+
+@cl.on_settings_update
+async def setup_agent(settings):
+    current_agent = settings["Agent"]
+
 
 class VariableStorage:
     def __init__(self):
