@@ -9,7 +9,7 @@ from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.llms import AzureOpenAI
 from langchain.document_loaders import DataFrameLoader
-from langchain.embeddings import OpenAIEmbeddings
+from langchain.embeddings import AzureOpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.vectorstores import Chroma
 from langchain.vectorstores.base import VectorStoreRetriever
@@ -42,7 +42,7 @@ def load_documents(df, page_content_column: str):
 
 
 def init_embedding_function():
-    return OpenAIEmbeddings(deployment="text-embedding-ada-002")
+    return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
 
 def load_vectordb(init: bool = False):
@@ -136,9 +136,7 @@ async def factory():
         model_name="text-davinci-003",
         temperature=0.7,
         streaming=True,
-        openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY")
-        if "OPENAI_API_KEY" not in os.environ
-        else None,
+        openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY") if "OPENAI_API_KEY" not in os.environ else os.environ["OPENAI_API_KEY"],
     )
 
     default_prompt = """{History}
@@ -160,12 +158,14 @@ async def factory():
         ),
     )
 
-    add_llm_provider(AzureOpenAIProvider)
+    #add_llm_provider(AzureOpenAIProvider)
+
 
 @cl.on_message
-async def run(message: str):
+async def run(message: cl.Message):
+    message_content = message.content
     global vectordb
-    if message == "/reload":
+    if message_content == "/reload":
         vectordb = load_vectordb(True)
         return await cl.Message(content="Data loaded").send()
 
@@ -176,7 +176,7 @@ async def run(message: str):
     if (user_session.get("variable_request")) != "":
         continuation = user_session.get("variable_request_continuation")
         user_session.get("variable_storage").add(
-            user_session.get("variable_request"), message
+            user_session.get("variable_request"), message_content
         )
     else:
         retriever = get_retriever(
@@ -184,7 +184,7 @@ async def run(message: str):
             user_session.get("score_threshold"),
             vectordb,
         )
-        document = retriever.get_relevant_documents(query=message)
+        document = retriever.get_relevant_documents(query=message_content)
 
         if len(document) == 1:
             user_session.set("context_state", document[0].metadata["Contextualisation"])
@@ -219,7 +219,7 @@ async def run(message: str):
                         "Persona": df_persona.loc[
                             df_persona["Role"] == document[0].metadata["Role"]
                         ]["Persona"].values[0],
-                        "Utterance": message,
+                        "Utterance": message_content,
                         "Response": user_session.get("variable_storage").replace(
                             document[0].metadata["Response"]
                         ),
