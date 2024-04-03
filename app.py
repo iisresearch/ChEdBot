@@ -60,9 +60,9 @@ def load_vectordb(init: bool = False):
         else:
             logger.info(f"Vector DB loaded")
     if init:
-        vectordb = Chroma.from_documents(
-            documents=load_documents(load_dialogues(), page_content_column="Utterance"),
-            embedding=init_embedding_function(),
+        vectordb = Chroma.from_documents( # Create a new Vector DB from the loaded documents
+            documents=load_documents(load_dialogues(), page_content_column="Utterance"), # Load dialogue utterances
+            embedding=init_embedding_function(), # Initialize embedding function
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
         )
@@ -70,29 +70,29 @@ def load_vectordb(init: bool = False):
         logger.info(f"Vector DB initialised")
     return vectordb
 
-
+# Create and return an instance of VectoreStoreRetriever for the given context state and score threshold.
 def get_retriever(context_state: str, score_threshold: str, vectordb):
     return VectorStoreRetriever(
-        vectorstore=vectordb,
-        search_type="similarity_score_threshold",
-        search_kwargs={
+        vectorstore=vectordb, # Vector DB
+        search_type="similarity_score_threshold", # Search type
+        search_kwargs={ # Search parameters
             "filter": {
                 "$and": [
                     {
                         "$or": [
-                            {"Context": {"$eq": ""}},
-                            {"Context": {"$eq": context_state}}
+                            {"Context": {"$eq": ""}}, # Empty context state
+                            {"Context": {"$eq": context_state}} # Context state
                         ]
                     },
-                    {"Agent": {"$eq": user_session.get("current_agent")}}
+                    {"Agent": {"$eq": user_session.get("current_agent")}} # Current agent
                 ]
             },
-            "k": 1,
-            "score_threshold": score_threshold,
+            "k": 1, # Number of results to return
+            "score_threshold": score_threshold, # Minimum similarity score
         },
     )
 
-
+# Send a message without using LLM, directly sending the content to the user.
 async def sendMessageNoLLM(content: str, author: str):
     msg = cl.Message(
         content="",
@@ -148,7 +148,7 @@ async def factory():
     Response: {Response}
     ##
     AI:"""
-
+    # Initialize the LLMChain with the default prompt, LLM, and chat memory.
     user_session.set(
         "llm_chain",
         LLMChain(
