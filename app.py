@@ -7,11 +7,11 @@ from chainlit.logger import logger
 from chainlit.input_widget import TextInput
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
-from langchain.llms import AzureOpenAI
-from langchain.document_loaders import DataFrameLoader
-from langchain.embeddings import AzureOpenAIEmbeddings
+from langchain_openai import AzureOpenAI
+from langchain_community.document_loaders import DataFrameLoader
+from langchain_openai import AzureOpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
-from langchain.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma
 from langchain.vectorstores.base import VectorStoreRetriever
 from chainlit.playground.config import add_llm_provider
 from chainlit.playground.providers import AzureOpenAI as AzureOpenAIProvider
@@ -20,21 +20,21 @@ from chromadb.config import Settings
 
 vectordb = None
 
-
+# Retrieve data from Google Sheet, store information about agents, dialogues, personas, and prompts.
 def load_agent():
-    return pd.read_excel(os.environ["AGENT_SHEET"], header=0, keep_default_na=False)
+    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Agents")
 
 
 def load_dialogues():
-    return pd.read_excel(os.environ["DIALOGUE_SHEET"], header=0, keep_default_na=False).astype(str)
+    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Dialogues").astype(str)
 
 
 def load_persona():
-    return pd.read_excel(os.environ["PERSONA_SHEET"], header=0, keep_default_na=False)
+    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Persona")
 
 
 def load_prompts():
-    return pd.read_excel(os.environ["PROMPT_SHEET"], header=0, keep_default_na=False)
+    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Prompts")
 
 
 def load_documents(df, page_content_column: str):
@@ -44,7 +44,8 @@ def load_documents(df, page_content_column: str):
 def init_embedding_function():
     return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
-
+# Initialize a Vector DB using Chroma. Store and retrieve embeddings of dialogue utterances for efficient similarity search.
+# It provides ability to match user input to the most relevant response based on contextual similarity.
 def load_vectordb(init: bool = False):
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
@@ -105,7 +106,7 @@ async def sendMessageNoLLM(content: str, author: str):
             await msg.stream_token(" ")
     await msg.send()
 
-
+# Chainlit function that sets up the initial chat and user session, including the current agent, chat settings, and memory for the conversation.
 @cl.on_chat_start
 async def factory():
     user_session.set("current_agent", "Kryptowerk")
@@ -123,14 +124,14 @@ async def factory():
     user_session.set("variable_storage", VariableStorage())
     user_session.set("variable_request", "")
     user_session.set("variable_request_continuation", "")
-
+    # Chat memory is managed using ConversationBufferWindowMemory, helping in maintaining context throughout the chat.
     chat_memory = ConversationBufferWindowMemory(
         memory_key="History",
         input_key="Utterance",
         k=df_agent["History"].values[0],
     )
     user_session.set("chat_memory", chat_memory)
-
+    # Sets the LLM and env vars
     llm = AzureOpenAI(
         deployment_name="davinci003",
         model_name="text-davinci-003",
@@ -160,7 +161,9 @@ async def factory():
 
     #add_llm_provider(AzureOpenAIProvider)
 
-
+# Core logic happens in run() for handling incoming messages and generating responses. 
+# Vector DB finds the best match for the user's message based on similarity. If found, it's formatted and sent back to the user.
+# /reload command refreshes data. 
 @cl.on_message
 async def run(message: cl.Message):
     message_content = message.content
@@ -172,7 +175,8 @@ async def run(message: cl.Message):
     df_prompts = user_session.get("df_prompts")
     df_persona = user_session.get("df_persona")
     agent = user_session.get("llm_chain")
-
+    # Conversation continuation is handled based on predefined intents and fallback mechanisms.
+    # It dynamically adjusts the conv. context, intents, and response prompts based on user interations and the result of similarity searches. 
     if (user_session.get("variable_request")) != "":
         continuation = user_session.get("variable_request_continuation")
         user_session.get("variable_storage").add(
@@ -287,11 +291,11 @@ async def run(message: cl.Message):
                 "variable_request_continuation",
                 document_continuation["metadatas"][0]["Continuation"],
             )
-
+# Responds to chat settings updates
 @cl.on_settings_update
 async def setup_agent(settings):
     user_session.set("current_agent", settings["Agent"])
-
+# VariableStorage manages and utilizes variables within the chatbot's conversations and responses
 class VariableStorage:
     def __init__(self):
         self.variables = {}

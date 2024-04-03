@@ -7,3 +7,8 @@ langchain_openai
 openai
 openpyxl
 tiktoken
+
+wikipedia
+numexpr
+langchainhub
+youtube-transcript-api
