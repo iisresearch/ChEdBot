@@ -50,6 +50,9 @@ def load_vectordb(init: bool = False):
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
     if not init and vectordb is None:
+        if os.path.exists(VECTORDB_FOLDER):
+            logger.info(f"Deleting existing Vector DB")
+            shutil.rmtree(VECTORDB_FOLDER)
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
             persist_directory=VECTORDB_FOLDER,
