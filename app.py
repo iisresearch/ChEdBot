@@ -111,14 +111,27 @@ async def sendMessageNoLLM(content: str, author: str):
 
 # Chainlit function that sets up the initial chat and user session, including the current agent, chat settings, and memory for the conversation.
 @cl.on_chat_start
-async def factory():
-    user_session.set("current_agent", "Kryptowerk")
-    await cl.ChatSettings(
-        [
-            TextInput(id="Agent", label="Agent", initial="Kryptowerk"),
-        ]
-    ).send()
+async def start():
+    # Load the agents data from the Google Sheet
     df_agent = load_agent()
+    available_agents = df_agent["Agent"].unique().tolist()
+    if len(available_agents) > 0:
+        settings = await cl.ChatSettings(
+            [
+                #TextInput(id="Agent", label="Agent", initial=available_agents[0]),
+                cl.input_widget.Tags(id="StopSequence", label="OpenAI - StopSequence", initial=["Answer:"]),
+                cl.input_widget.Switch(id="Streaming", label="OpenAI - Stream Tokens", initial=True),
+                cl.input_widget.Select(
+                    id="Agent",
+                    label="Agent",
+                    values=available_agents,
+                    initial_index=0,
+                )
+            ]
+        ).send()
+        user_session.set("current_agent", settings["Agent"])
+        logger.info(f"Agent set to {settings['Agent']}")
+    else: logger.error("No available agents found in df_agent. Please check the Google Sheet for the 'Agents' tab.")
     load_vectordb()
     user_session.set("context_state", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
     user_session.set("score_threshold", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
