@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 import pandas as pd
 import chainlit as cl
@@ -14,7 +15,6 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.vectorstores import Chroma
 from langchain.vectorstores.base import VectorStoreRetriever
 from chainlit.playground.config import add_llm_provider
-from chainlit.playground.providers import AzureOpenAI as AzureOpenAIProvider
 from chromadb.config import Settings
 
 
