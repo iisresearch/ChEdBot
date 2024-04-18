@@ -133,6 +133,11 @@ async def start():
         logger.info(f"Agent set to {settings['Agent']}")
     else: logger.error("No available agents found in df_agent. Please check the Google Sheet for the 'Agents' tab.")
     load_vectordb()
+    await set_agent()
+
+@cl.step(name="set_agent", type="llm", show_input=True)
+async def set_agent():
+    df_agent = load_agent()
     user_session.set("context_state", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
     user_session.set("score_threshold", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
     user_session.set("df_prompts", load_prompts())
@@ -174,7 +179,8 @@ async def start():
             memory=chat_memory,
         ),
     )
-
+    # Send a welcome message to the user
+    await cl.Message(content=f"Welcome to the {user_session.get("current_agent")} chatbot! You can now start your conversation.").send()
     #add_llm_provider(AzureOpenAIProvider)
 
 # Core logic happens in run() for handling incoming messages and generating responses. 
@@ -234,7 +240,7 @@ async def run(message: cl.Message):
                     "Temperature"
                 ].values[0]
 
-                response = await agent.acall(
+                response = await agent.ainvoke(
                     {
                         "Persona": df_persona.loc[
                             df_persona["Role"] == document[0].metadata["Role"]
@@ -244,7 +250,7 @@ async def run(message: cl.Message):
                             document[0].metadata["Response"]
                         ),
                     },
-                    callbacks=[cl.AsyncLangchainCallbackHandler()],
+                    callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)],
                 )
                 await cl.Message(
                     content=response["text"],
@@ -254,6 +260,7 @@ async def run(message: cl.Message):
             continuation = user_session.get("fallback_intent")
 
     while continuation != "":
+        print(f"Continuation value: {continuation}")
         document_continuation = vectordb.get(where={"Intent": continuation})
 
         prompt = document_continuation["metadatas"][0]["Prompt"]
@@ -272,7 +279,7 @@ async def run(message: cl.Message):
                 "Temperature"
             ].values[0]
 
-            response = await agent.acall(
+            response = await agent.ainvoke(
                 {
                     "Persona": df_persona.loc[
                         df_persona["Role"]
@@ -283,7 +290,7 @@ async def run(message: cl.Message):
                         document_continuation["metadatas"][0]["Response"]
                     ),
                 },
-                callbacks=[cl.AsyncLangchainCallbackHandler()],
+                callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)],
             )
             await cl.Message(
                 content=response["text"],
@@ -311,6 +318,8 @@ async def run(message: cl.Message):
 @cl.on_settings_update
 async def setup_agent(settings):
     user_session.set("current_agent", settings["Agent"])
+    logger.info(f"Agent changed to {settings['Agent']}")
+    await set_agent()
 # VariableStorage manages and utilizes variables within the chatbot's conversations and responses
 class VariableStorage:
     def __init__(self):
@@ -325,3 +334,7 @@ class VariableStorage:
     def iterate(self):
         for name, value in self.variables.items():
             yield name, value
+
+if __name__ == "__main__":
+    from chainlit.cli import run_chainlit
+    run_chainlit(__file__)
