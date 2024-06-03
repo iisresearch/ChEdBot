@@ -12,13 +12,16 @@ from langchain_openai import AzureOpenAI
 from langchain_community.document_loaders import DataFrameLoader
 from langchain_openai import AzureOpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
-from langchain_community.vectorstores import Chroma
+from langchain_chroma.vectorstores import Chroma
 from langchain.vectorstores.base import VectorStoreRetriever
 from chainlit.playground.config import add_llm_provider
 from chromadb.config import Settings
+from dotenv import load_dotenv
 
-
+load_dotenv()
 vectordb = None
+
+print(os.getenv("OPENAI_API_KEY"))
 
 # Retrieve data from Google Sheet, store information about agents, dialogues, personas, and prompts.
 def load_agent():
@@ -26,7 +29,8 @@ def load_agent():
 
 
 def load_dialogues():
-    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Dialogues").astype(str)
+    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Dialogues").astype(
+        str)
 
 
 def load_persona():
@@ -44,8 +48,9 @@ def load_documents(df, page_content_column: str):
 def init_embedding_function():
     return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
-# Initialize a Vector DB using Chroma. Store and retrieve embeddings of dialogue utterances for efficient similarity search.
-# It provides ability to match user input to the most relevant response based on contextual similarity.
+
+# Initialize a Vector DB using Chroma. Store and retrieve embeddings of dialogue utterances for efficient similarity
+# search. It provides ability to match user input to the most relevant response based on contextual similarity.
 def load_vectordb(init: bool = False):
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
@@ -63,37 +68,38 @@ def load_vectordb(init: bool = False):
         else:
             logger.info(f"Vector DB loaded")
     if init:
-        vectordb = Chroma.from_documents( # Create a new Vector DB from the loaded documents
-            documents=load_documents(load_dialogues(), page_content_column="Utterance"), # Load dialogue utterances
-            embedding=init_embedding_function(), # Initialize embedding function
+        vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
+            documents=load_documents(load_dialogues(), page_content_column="Utterance"),  # Load dialogue utterances
+            embedding=init_embedding_function(),  # Initialize embedding function
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
         )
-        vectordb.persist()
         logger.info(f"Vector DB initialised")
     return vectordb
+
 
 # Create and return an instance of VectoreStoreRetriever for the given context state and score threshold.
 def get_retriever(context_state: str, score_threshold: str, vectordb):
     return VectorStoreRetriever(
-        vectorstore=vectordb, # Vector DB
-        search_type="similarity_score_threshold", # Search type
-        search_kwargs={ # Search parameters
+        vectorstore=vectordb,  # Vector DB
+        search_type="similarity_score_threshold",  # Search type
+        search_kwargs={  # Search parameters
             "filter": {
                 "$and": [
                     {
                         "$or": [
-                            {"Context": {"$eq": ""}}, # Empty context state
-                            {"Context": {"$eq": context_state}} # Context state
+                            {"Context": {"$eq": ""}},  # Empty context state
+                            {"Context": {"$eq": context_state}}  # Context state
                         ]
                     },
-                    {"Agent": {"$eq": user_session.get("current_agent")}} # Current agent
+                    {"Agent": {"$eq": user_session.get("current_agent")}}  # Current agent
                 ]
             },
-            "k": 1, # Number of results to return
-            "score_threshold": score_threshold, # Minimum similarity score
+            "k": 1,  # Number of results to return
+            "score_threshold": score_threshold,  # Minimum similarity score
         },
     )
+
 
 # Send a message without using LLM, directly sending the content to the user.
 async def sendMessageNoLLM(content: str, author: str):
@@ -108,6 +114,7 @@ async def sendMessageNoLLM(content: str, author: str):
         if i < len(tokens) - 1:
             await msg.stream_token(" ")
     await msg.send()
+
 
 # Chainlit function that sets up the initial chat and user session, including the current agent, chat settings, and memory for the conversation.
 @cl.on_chat_start
@@ -131,15 +138,19 @@ async def start():
         ).send()
         user_session.set("current_agent", settings["Agent"])
         logger.info(f"Agent set to {settings['Agent']}")
-    else: logger.error("No available agents found in df_agent. Please check the Google Sheet for the 'Agents' tab.")
+    else:
+        logger.error("No available agents found in df_agent. Please check the Google Sheet for the 'Agents' tab.")
     load_vectordb()
     await set_agent()
+
 
 @cl.step(name="set_agent", type="llm", show_input=True)
 async def set_agent():
     df_agent = load_agent()
-    user_session.set("context_state", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
-    user_session.set("score_threshold", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
+    user_session.set("context_state",
+                     df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
+    user_session.set("score_threshold",
+                     df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
     user_session.set("df_prompts", load_prompts())
     user_session.set("df_persona", load_persona())
     user_session.set("variable_storage", VariableStorage())
@@ -158,7 +169,8 @@ async def set_agent():
         model_name="text-davinci-003",
         temperature=0.7,
         streaming=True,
-        openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY") if "OPENAI_API_KEY" not in os.environ else os.environ["OPENAI_API_KEY"],
+        openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY") if "OPENAI_API_KEY" not in os.environ else
+        os.environ["OPENAI_API_KEY"],
     )
 
     default_prompt = """{History}
@@ -180,12 +192,14 @@ async def set_agent():
         ),
     )
     # Send a welcome message to the user
-    await cl.Message(content=f"Welcome to the {user_session.get("current_agent")} chatbot! You can now start your conversation.").send()
+    await cl.Message(
+        content=f"Welcome to the {user_session.get('current_agent')} chatbot! You can now start your conversation.").send()
     #add_llm_provider(AzureOpenAIProvider)
 
-# Core logic happens in run() for handling incoming messages and generating responses. 
-# Vector DB finds the best match for the user's message based on similarity. If found, it's formatted and sent back to the user.
-# /reload command refreshes data. 
+
+# Core logic happens in run() for handling incoming messages and generating responses. Vector DB finds the best match
+# for the user's message based on similarity. If found, it's formatted and sent back to the user. /reload command
+# refreshes data.
 @cl.on_message
 async def run(message: cl.Message):
     message_content = message.content
@@ -244,7 +258,7 @@ async def run(message: cl.Message):
                     {
                         "Persona": df_persona.loc[
                             df_persona["Role"] == document[0].metadata["Role"]
-                        ]["Persona"].values[0],
+                            ]["Persona"].values[0],
                         "Utterance": message_content,
                         "Response": user_session.get("variable_storage").replace(
                             document[0].metadata["Response"]
@@ -284,7 +298,7 @@ async def run(message: cl.Message):
                     "Persona": df_persona.loc[
                         df_persona["Role"]
                         == document_continuation["metadatas"][0]["Role"]
-                    ]["Persona"].values[0],
+                        ]["Persona"].values[0],
                     "Utterance": "",
                     "Response": user_session.get("variable_storage").replace(
                         document_continuation["metadatas"][0]["Response"]
@@ -314,12 +328,16 @@ async def run(message: cl.Message):
                 "variable_request_continuation",
                 document_continuation["metadatas"][0]["Continuation"],
             )
+
+
 # Responds to chat settings updates
 @cl.on_settings_update
 async def setup_agent(settings):
     user_session.set("current_agent", settings["Agent"])
     logger.info(f"Agent changed to {settings['Agent']}")
     await set_agent()
+
+
 # VariableStorage manages and utilizes variables within the chatbot's conversations and responses
 class VariableStorage:
     def __init__(self):
@@ -335,6 +353,8 @@ class VariableStorage:
         for name, value in self.variables.items():
             yield name, value
 
+
 if __name__ == "__main__":
     from chainlit.cli import run_chainlit
+
     run_chainlit(__file__)

@@ -2,8 +2,10 @@ pandas
 chromadb
 chainlit
 langchain
-langchain_core
-langchain_openai
+langchain-community
+langchain-chroma
+langchain-core
+langchain-openai
 openai
 openpyxl
 tiktoken
