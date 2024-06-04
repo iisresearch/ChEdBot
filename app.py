@@ -14,7 +14,7 @@ from langchain_openai import AzureOpenAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_chroma.vectorstores import Chroma
 from langchain.vectorstores.base import VectorStoreRetriever
-from chainlit.playground.config import add_llm_provider
+# from chainlit.playground.config import add_llm_provider
 from chromadb.config import Settings
 from dotenv import load_dotenv
 
@@ -120,12 +120,18 @@ async def sendMessageNoLLM(content: str, author: str):
 @cl.on_chat_start
 async def start():
     # Load the agents data from the Google Sheet
+    agent_id = await cl.CopilotFunction(name="url_query_parameter", args={"msg": "agent_id"}).acall()
+    await cl.Message(
+        content=f"Welcome to the {agent_id} chatbot! You can now start your conversation.").send()
+
+'''
     df_agent = load_agent()
+
     available_agents = df_agent["Agent"].unique().tolist()
     if len(available_agents) > 0:
         settings = await cl.ChatSettings(
             [
-                #TextInput(id="Agent", label="Agent", initial=available_agents[0]),
+                # TextInput(id="Agent", label="Agent", initial=available_agents[0]),
                 cl.input_widget.Tags(id="StopSequence", label="OpenAI - StopSequence", initial=["Answer:"]),
                 cl.input_widget.Switch(id="Streaming", label="OpenAI - Stream Tokens", initial=True),
                 cl.input_widget.Select(
@@ -142,6 +148,7 @@ async def start():
         logger.error("No available agents found in df_agent. Please check the Google Sheet for the 'Agents' tab.")
     load_vectordb()
     await set_agent()
+'''
 
 
 @cl.step(name="set_agent", type="llm", show_input=True)
@@ -163,14 +170,17 @@ async def set_agent():
         k=df_agent["History"].values[0],
     )
     user_session.set("chat_memory", chat_memory)
+    print(os.environ)
+    openai_api_key = cl.user_session.get("env").get("OPENAI_API_KEY") if os.getenv(
+        "OPENAI_API_KEY") not in os.environ else os.getenv("OPENAI_API_KEY")
+
     # Sets the LLM and env vars
     llm = AzureOpenAI(
         deployment_name="davinci003",
         model_name="text-davinci-003",
         temperature=0.7,
         streaming=True,
-        openai_api_key=cl.user_session.get("env").get("OPENAI_API_KEY") if "OPENAI_API_KEY" not in os.environ else
-        os.environ["OPENAI_API_KEY"],
+        openai_api_key=openai_api_key,
     )
 
     default_prompt = """{History}
@@ -194,7 +204,7 @@ async def set_agent():
     # Send a welcome message to the user
     await cl.Message(
         content=f"Welcome to the {user_session.get('current_agent')} chatbot! You can now start your conversation.").send()
-    #add_llm_provider(AzureOpenAIProvider)
+    # add_llm_provider(AzureOpenAIProvider)
 
 
 # Core logic happens in run() for handling incoming messages and generating responses. Vector DB finds the best match
