@@ -3,6 +3,7 @@ import shutil
 import time
 import pandas as pd
 import chainlit as cl
+import database as db
 from chainlit import user_session
 from chainlit.logger import logger
 from chainlit.input_widget import TextInput
@@ -21,25 +22,6 @@ from dotenv import load_dotenv
 load_dotenv()
 vectordb = None
 
-print(os.getenv("OPENAI_API_KEY"))
-
-# Retrieve data from Google Sheet, store information about agents, dialogues, personas, and prompts.
-def load_agent():
-    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Agents")
-
-
-def load_dialogues():
-    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Dialogues").astype(
-        str)
-
-
-def load_persona():
-    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Persona")
-
-
-def load_prompts():
-    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Prompts")
-
 
 def load_documents(df, page_content_column: str):
     return DataFrameLoader(df, page_content_column).load()
@@ -54,6 +36,7 @@ def init_embedding_function():
 def load_vectordb(init: bool = False):
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
+    df_agent = user_session.get("current_agent")
     if not init and vectordb is None:
         if os.path.exists(VECTORDB_FOLDER):
             logger.info(f"Deleting existing Vector DB")
@@ -69,7 +52,7 @@ def load_vectordb(init: bool = False):
             logger.info(f"Vector DB loaded")
     if init:
         vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
-            documents=load_documents(load_dialogues(), page_content_column="Utterance"),  # Load dialogue utterances
+            documents=load_documents(db.load_dialogues(df_agent.id.iloc[0]).iloc[[0]], page_content_column="utterance"),  # Load dialogue utterances
             embedding=init_embedding_function(),  # Initialize embedding function
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
@@ -119,47 +102,42 @@ async def sendMessageNoLLM(content: str, author: str):
 # Chainlit function that sets up the initial chat and user session, including the current agent, chat settings, and memory for the conversation.
 @cl.on_chat_start
 async def start():
-    # Load the agents data from the Google Sheet
+    # Get the agent ID from the URL query parameter
     agent_id = await cl.CopilotFunction(name="url_query_parameter", args={"msg": "agent_id"}).acall()
-    await cl.Message(
-        content=f"Welcome to the {agent_id} chatbot! You can now start your conversation.").send()
 
-'''
-    df_agent = load_agent()
+    # Load the agent's data from Postgres DB, see database.py
+    df_agent = db.load_agent(agent_id)
+    print("Available agents:" + str(df_agent))
 
-    available_agents = df_agent["Agent"].unique().tolist()
-    if len(available_agents) > 0:
+    await cl.Message(content=f"Welcome to the \n{df_agent.name.iloc[0]}\n chatbot! You can now start your conversation.").send()
+
+    if df_agent is not None and not df_agent.empty:
         settings = await cl.ChatSettings(
-            [
+            [   # Set the chat settings for the user if needed
                 # TextInput(id="Agent", label="Agent", initial=available_agents[0]),
-                cl.input_widget.Tags(id="StopSequence", label="OpenAI - StopSequence", initial=["Answer:"]),
-                cl.input_widget.Switch(id="Streaming", label="OpenAI - Stream Tokens", initial=True),
-                cl.input_widget.Select(
-                    id="Agent",
-                    label="Agent",
-                    values=available_agents,
-                    initial_index=0,
-                )
+                # cl.input_widget.Tags(id="StopSequence", label="OpenAI - StopSequence", initial=["Answer:"]),
+                # cl.input_widget.Switch(id="Streaming", label="OpenAI - Stream Tokens", initial=True),
             ]
         ).send()
-        user_session.set("current_agent", settings["Agent"])
-        logger.info(f"Agent set to {settings['Agent']}")
+        user_session.set("current_agent", df_agent)
+        logger.info(f"Agent set to {user_session.get('current_agent')}")
     else:
-        logger.error("No available agents found in df_agent. Please check the Google Sheet for the 'Agents' tab.")
+        logger.error("No available agents found in df_agent. Please check the Postgres DB for the 'Character' table.")
+        return
     load_vectordb()
     await set_agent()
-'''
 
 
 @cl.step(name="set_agent", type="llm", show_input=True)
 async def set_agent():
-    df_agent = load_agent()
-    user_session.set("context_state",
-                     df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
-    user_session.set("score_threshold",
-                     df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
-    user_session.set("df_prompts", load_prompts())
-    user_session.set("df_persona", load_persona())
+    df_agent = user_session.get("current_agent")
+    # user_session.set("context_state", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
+    user_session.set("context_state", db.load_contexts(df_agent.id.iloc[0]).iloc[0])
+    print(f"Context state: {user_session.get("context_state")}")
+    # user_session.set("score_threshold", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
+    user_session.set("score_threshold", 0.8)  # Set the similarity score threshold for the user
+    user_session.set("df_prompts", db.load_prompts())
+    user_session.set("df_persona", db.load_persona(df_agent))
     user_session.set("variable_storage", VariableStorage())
     user_session.set("variable_request", "")
     user_session.set("variable_request_continuation", "")
@@ -167,7 +145,7 @@ async def set_agent():
     chat_memory = ConversationBufferWindowMemory(
         memory_key="History",
         input_key="Utterance",
-        k=df_agent["History"].values[0],
+        k=df_agent["history"],
     )
     user_session.set("chat_memory", chat_memory)
     print(os.environ)

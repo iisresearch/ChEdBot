@@ -9,6 +9,7 @@ langchain-openai
 openai
 openpyxl
 tiktoken
+psycopg2 # for postgres
 
 wikipedia
 numexpr
