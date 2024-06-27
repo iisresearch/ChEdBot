@@ -8,7 +8,7 @@ enable_telemetry = true
 id = "ChEdBot-ZEfU7QTMoLeq"
 
 # List of environment variables to be provided by each user to use the app.
-user_env = ["OPENAI_API_KEY"]
+# user_env = ["OPENAI_API_KEY"]
 
 # Duration (in seconds) during which the session is saved when the connection is lost
 session_timeout = 3600

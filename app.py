@@ -105,6 +105,10 @@ async def start():
     # Get the agent ID from the URL query parameter
     agent_id = await cl.CopilotFunction(name="url_query_parameter", args={"msg": "agent_id"}).acall()
 
+    if not agent_id or agent_id == "":
+        logger.error("No agent ID found in the URL query parameter.")
+        await cl.Message(content="No agent_id provided. Please provide a valid agent_id.").send()
+        return
     # Load the agent's data from Postgres DB, see database.py
     df_agent = db.load_agent(agent_id)
     print("Available agents:" + str(df_agent))
@@ -133,7 +137,7 @@ async def set_agent():
     df_agent = user_session.get("current_agent")
     # user_session.set("context_state", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
     user_session.set("context_state", db.load_contexts(df_agent.id.iloc[0]).iloc[0])
-    print(f"Context state: {user_session.get("context_state")}")
+    #print(f"Context state: {user_session.get("context_state")}")
     # user_session.set("score_threshold", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
     user_session.set("score_threshold", 0.8)  # Set the similarity score threshold for the user
     user_session.set("df_prompts", db.load_prompts())
