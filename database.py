@@ -49,11 +49,13 @@ def load_contexts(agent_id):
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Contexts")
 
 
-def load_dialogues(agent_id):
+def load_dialogues(character_id):
     connection = connect_to_postgres()
     query = f"""
-        SELECT * FROM character, message, context
-        WHERE context.id = message."contextId" AND character.id = {agent_id} 
+        SELECT message.* FROM character
+        INNER JOIN context ON character.id = context."characterId"
+        INNER JOIN message ON context.id = message."contextId"
+        WHERE character.id = {character_id}
         ORDER BY message.intent ASC
         """
     df_messages = pd.read_sql_query(query, connection)

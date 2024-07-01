@@ -36,7 +36,7 @@ def init_embedding_function():
 def load_vectordb(init: bool = False):
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
-    df_agent = user_session.get("current_agent")
+    df_character = user_session.get("current_character")
     if not init and vectordb is None:
         if os.path.exists(VECTORDB_FOLDER):
             logger.info(f"Deleting existing Vector DB")
@@ -52,7 +52,7 @@ def load_vectordb(init: bool = False):
             logger.info(f"Vector DB loaded")
     if init:
         vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
-            documents=load_documents(db.load_dialogues(df_agent.id.iloc[0]).iloc[[0]], page_content_column="utterance"),  # Load dialogue utterances
+            documents=load_documents(db.load_dialogues(df_character.id.iloc[0]), page_content_column="utterance"),  # Load dialogue utterances
             embedding=init_embedding_function(),  # Initialize embedding function
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
@@ -75,7 +75,7 @@ def get_retriever(context_state: str, score_threshold: str, vectordb):
                             {"Context": {"$eq": context_state}}  # Context state
                         ]
                     },
-                    {"Agent": {"$eq": user_session.get("current_agent")}}  # Current agent
+                    {"Agent": {"$eq": user_session.get("current_character")}}  # Current agent
                 ]
             },
             "k": 1,  # Number of results to return
@@ -110,12 +110,12 @@ async def start():
         await cl.Message(content="No agent_id provided. Please provide a valid agent_id.").send()
         return
     # Load the agent's data from Postgres DB, see database.py
-    df_agent = db.load_agent(agent_id)
-    print("Available agents:" + str(df_agent))
+    df_character = db.load_agent(agent_id)
+    print("Available agents:" + str(df_character))
 
-    await cl.Message(content=f"Welcome to the \n{df_agent.name.iloc[0]}\n chatbot! You can now start your conversation.").send()
+    await cl.Message(content=f"Welcome to the \n{df_character.name.iloc[0]}\n chatbot! You can now start your conversation.").send()
 
-    if df_agent is not None and not df_agent.empty:
+    if df_character is not None and not df_character.empty:
         settings = await cl.ChatSettings(
             [   # Set the chat settings for the user if needed
                 # TextInput(id="Agent", label="Agent", initial=available_agents[0]),
@@ -123,10 +123,10 @@ async def start():
                 # cl.input_widget.Switch(id="Streaming", label="OpenAI - Stream Tokens", initial=True),
             ]
         ).send()
-        user_session.set("current_agent", df_agent)
-        logger.info(f"Agent set to {user_session.get('current_agent')}")
+        user_session.set("current_character", df_character)
+        logger.info(f"Agent set to {user_session.get('current_character')}")
     else:
-        logger.error("No available agents found in df_agent. Please check the Postgres DB for the 'Character' table.")
+        logger.error("No available characters found in df_character. Please check the Postgres DB for the 'Character' table.")
         return
     load_vectordb()
     await set_agent()
@@ -134,14 +134,14 @@ async def start():
 
 @cl.step(name="set_agent", type="llm", show_input=True)
 async def set_agent():
-    df_agent = user_session.get("current_agent")
-    # user_session.set("context_state", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Context"].iloc[0])
-    user_session.set("context_state", db.load_contexts(df_agent.id.iloc[0]).iloc[0])
+    df_character = user_session.get("current_character")
+    # user_session.set("context_state", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Context"].iloc[0])
+    user_session.set("context_state", db.load_contexts(df_character.id.iloc[0]).iloc[0])
     #print(f"Context state: {user_session.get("context_state")}")
-    # user_session.set("score_threshold", df_agent.loc[df_agent["Agent"] == user_session.get("current_agent"), "Threshold"].iloc[0])
+    # user_session.set("score_threshold", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Threshold"].iloc[0])
     user_session.set("score_threshold", 0.8)  # Set the similarity score threshold for the user
     user_session.set("df_prompts", db.load_prompts())
-    user_session.set("df_persona", db.load_persona(df_agent))
+    user_session.set("df_persona", db.load_persona(df_character))
     user_session.set("variable_storage", VariableStorage())
     user_session.set("variable_request", "")
     user_session.set("variable_request_continuation", "")
@@ -149,11 +149,15 @@ async def set_agent():
     chat_memory = ConversationBufferWindowMemory(
         memory_key="History",
         input_key="Utterance",
-        k=df_agent["history"],
+        k=df_character["history"],
     )
     user_session.set("chat_memory", chat_memory)
-    print(os.environ)
-    openai_api_key = cl.user_session.get("env").get("OPENAI_API_KEY") if os.getenv(
+
+    # Check user environment
+    user_env = cl.user_session.get("env")
+    print(f"User env: {user_env}")
+    print(f"OpenAI API key: {os.getenv('OPENAI_API_KEY')}")
+    openai_api_key = user_env.get("OPENAI_API_KEY") if os.getenv(
         "OPENAI_API_KEY") not in os.environ else os.getenv("OPENAI_API_KEY")
 
     # Sets the LLM and env vars
@@ -185,7 +189,7 @@ async def set_agent():
     )
     # Send a welcome message to the user
     await cl.Message(
-        content=f"Welcome to the {user_session.get('current_agent')} chatbot! You can now start your conversation.").send()
+        content=f"Welcome to the {user_session.get('current_character')} chatbot! You can now start your conversation.").send()
     # add_llm_provider(AzureOpenAIProvider)
 
 
@@ -325,7 +329,7 @@ async def run(message: cl.Message):
 # Responds to chat settings updates
 @cl.on_settings_update
 async def setup_agent(settings):
-    user_session.set("current_agent", settings["Agent"])
+    user_session.set("current_character", settings["Agent"])
     logger.info(f"Agent changed to {settings['Agent']}")
     await set_agent()
 
