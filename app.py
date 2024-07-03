@@ -61,8 +61,9 @@ def load_vectordb(init: bool = False):
     return vectordb
 
 
-# Create and return an instance of VectoreStoreRetriever for the given context state and score threshold.
+# Create and return an instance of VectorStoreRetriever for the given context state and score threshold.
 def get_retriever(context_state: str, score_threshold: str, vectordb):
+    character_id = str(user_session.get("current_character")['id'].iloc[0])
     return VectorStoreRetriever(
         vectorstore=vectordb,  # Vector DB
         search_type="similarity_score_threshold",  # Search type
@@ -71,11 +72,11 @@ def get_retriever(context_state: str, score_threshold: str, vectordb):
                 "$and": [
                     {
                         "$or": [
-                            {"Context": {"$eq": ""}},  # Empty context state
-                            {"Context": {"$eq": context_state}}  # Context state
+                            {"context_name": {"$eq": ""}},  # Empty context state
+                            {"context_name": {"$eq": context_state}}  # Context state
                         ]
                     },
-                    {"Agent": {"$eq": user_session.get("current_character")}}  # Current agent
+                    {"character_id": {"$eq": character_id}}  # Current character id
                 ]
             },
             "k": 1,  # Number of results to return
@@ -99,26 +100,27 @@ async def sendMessageNoLLM(content: str, author: str):
     await msg.send()
 
 
-# Chainlit function that sets up the initial chat and user session, including the current agent, chat settings, and memory for the conversation.
+# Chainlit function that sets up the initial chat and user session, including the current character, chat settings, and memory for the conversation.
 @cl.on_chat_start
 async def start():
-    # Get the agent ID from the URL query parameter
-    agent_id = await cl.CopilotFunction(name="url_query_parameter", args={"msg": "agent_id"}).acall()
-
-    if not agent_id or agent_id == "":
-        logger.error("No agent ID found in the URL query parameter.")
-        await cl.Message(content="No agent_id provided. Please provide a valid agent_id.").send()
+    # Get the character ID from the URL query parameter
+    character_id = await cl.CopilotFunction(name="url_query_parameter", args={"msg": "character_id"}).acall()
+    print(f"Character ID: {character_id}")
+    if not character_id or character_id == "":
+        logger.error("No character ID found in the URL query parameter.")
+        await cl.Message(content="No character_id provided. Please provide a valid character_id.").send()
         return
-    # Load the agent's data from Postgres DB, see database.py
-    df_character = db.load_agent(agent_id)
-    print("Available agents:" + str(df_character))
+    # Load the character's data from Postgres DB, see database.py
+    df_character = db.load_character(character_id)
+    print("Available characters:" + str(df_character))
 
-    await cl.Message(content=f"Welcome to the \n{df_character.name.iloc[0]}\n chatbot! You can now start your conversation.").send()
+    await cl.Message(content=f"Welcome to the \n{df_character.name.iloc[0]}\n chatbot! "
+                             f"You can now start your conversation.").send()
 
     if df_character is not None and not df_character.empty:
         settings = await cl.ChatSettings(
             [   # Set the chat settings for the user if needed
-                # TextInput(id="Agent", label="Agent", initial=available_agents[0]),
+                # TextInput(id="Agent", label="Agent", initial=available_characters[0]),
                 # cl.input_widget.Tags(id="StopSequence", label="OpenAI - StopSequence", initial=["Answer:"]),
                 # cl.input_widget.Switch(id="Streaming", label="OpenAI - Stream Tokens", initial=True),
             ]
@@ -129,15 +131,15 @@ async def start():
         logger.error("No available characters found in df_character. Please check the Postgres DB for the 'Character' table.")
         return
     load_vectordb()
-    await set_agent()
+    await set_character()
 
 
-@cl.step(name="set_agent", type="llm", show_input=True)
-async def set_agent():
+@cl.step(name="set_character", type="llm", show_input=True)
+async def set_character():
     df_character = user_session.get("current_character")
     # user_session.set("context_state", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Context"].iloc[0])
-    user_session.set("context_state", db.load_contexts(df_character.id.iloc[0]).iloc[0])
-    #print(f"Context state: {user_session.get("context_state")}")
+    user_session.set("context_state", db.load_contexts(df_character.id.iloc[0])['name'].iloc[0])
+    print(f"Context state: {user_session.get("context_state")}")
     # user_session.set("score_threshold", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Threshold"].iloc[0])
     user_session.set("score_threshold", 0.8)  # Set the similarity score threshold for the user
     user_session.set("df_prompts", db.load_prompts())
@@ -157,8 +159,7 @@ async def set_agent():
     user_env = cl.user_session.get("env")
     print(f"User env: {user_env}")
     print(f"OpenAI API key: {os.getenv('OPENAI_API_KEY')}")
-    openai_api_key = user_env.get("OPENAI_API_KEY") if os.getenv(
-        "OPENAI_API_KEY") not in os.environ else os.getenv("OPENAI_API_KEY")
+    openai_api_key = os.getenv("OPENAI_API_KEY") if os.getenv("OPENAI_API_KEY") in os.environ else user_env.get("OPENAI_API_KEY")
 
     # Sets the LLM and env vars
     llm = AzureOpenAI(
@@ -206,7 +207,7 @@ async def run(message: cl.Message):
 
     df_prompts = user_session.get("df_prompts")
     df_persona = user_session.get("df_persona")
-    agent = user_session.get("llm_chain")
+    character = user_session.get("llm_chain")
     # Conversation continuation is handled based on predefined intents and fallback mechanisms.
     # It dynamically adjusts the conv. context, intents, and response prompts based on user interations and the result of similarity searches. 
     if (user_session.get("variable_request")) != "":
@@ -215,6 +216,7 @@ async def run(message: cl.Message):
             user_session.get("variable_request"), message_content
         )
     else:
+        context_state = user_session.get("context_state")
         retriever = get_retriever(
             user_session.get("context_state"),
             user_session.get("score_threshold"),
@@ -243,14 +245,14 @@ async def run(message: cl.Message):
                     document[0].metadata["Role"],
                 )
             else:
-                agent.prompt = PromptTemplate.from_template(
+                character.prompt = PromptTemplate.from_template(
                     df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
                 )
-                agent.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
+                character.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
                     "Temperature"
                 ].values[0]
 
-                response = await agent.ainvoke(
+                response = await character.ainvoke(
                     {
                         "Persona": df_persona.loc[
                             df_persona["Role"] == document[0].metadata["Role"]
@@ -282,14 +284,14 @@ async def run(message: cl.Message):
                 document_continuation["metadatas"][0]["Role"],
             )
         else:
-            agent.prompt = PromptTemplate.from_template(
+            character.prompt = PromptTemplate.from_template(
                 df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
             )
-            agent.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
+            character.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
                 "Temperature"
             ].values[0]
 
-            response = await agent.ainvoke(
+            response = await character.ainvoke(
                 {
                     "Persona": df_persona.loc[
                         df_persona["Role"]
@@ -328,10 +330,10 @@ async def run(message: cl.Message):
 
 # Responds to chat settings updates
 @cl.on_settings_update
-async def setup_agent(settings):
+async def setup_character(settings):
     user_session.set("current_character", settings["Agent"])
     logger.info(f"Agent changed to {settings['Agent']}")
-    await set_agent()
+    await set_character()
 
 
 # VariableStorage manages and utilizes variables within the chatbot's conversations and responses
