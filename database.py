@@ -24,25 +24,24 @@ def connect_to_postgres():
 
 
 # Retrieve data from Postgres DB, store information about agents, dialogues, personas, and prompts.
-def load_agent(agent_id):
+def load_character(character_id):
     connection = connect_to_postgres()
     query = f"""
     SELECT ch.*
     FROM character ch
-    WHERE ch.id = {agent_id} ;"""
-    df_agent = pd.read_sql_query(query, connection)
+    WHERE ch.id = {character_id} ;"""
+    df_character = pd.read_sql_query(query, connection)
     connection.close()
-    return df_agent
+    return df_character
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Agents")
 
 
-def load_contexts(agent_id):
+def load_contexts(character_id):
     connection = connect_to_postgres()
     query = f"""
         SELECT * FROM context 
-        WHERE "characterId" = {agent_id} 
-        ORDER BY id ASC ;
-        """
+        WHERE "characterId" = {character_id} 
+        ORDER BY id ASC ;"""
     df_contexts = pd.read_sql_query(query, connection)
     connection.close()
     return df_contexts
@@ -52,7 +51,9 @@ def load_contexts(agent_id):
 def load_dialogues(character_id):
     connection = connect_to_postgres()
     query = f"""
-        SELECT message.* FROM character
+        SELECT message.*, context.name as context_name, character.id as character_id, character.name as character_name, character.description as character_description, character.title as character_title, character."chatbotUrl" as "character_chatbotUrl", character."gameId" as "character_gameId", character.history as "character_history",
+        character.title as character_title, character.description as character_description
+        FROM character
         INNER JOIN context ON character.id = context."characterId"
         INNER JOIN message ON context.id = message."contextId"
         WHERE character.id = {character_id}
@@ -64,10 +65,22 @@ def load_dialogues(character_id):
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Dialogues").astype(str)
 
 
-def load_persona(df_agent):
-    return df_agent.description
+def load_persona(df_character):
+    return df_character.description
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Persona")
 
 
 def load_prompts():
-    return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Prompts")
+    default_prompt = '''
+    {History}
+    ##
+    System: {Persona}
+    ##
+    Human: {Utterance}
+    Response: {Response}
+    ##
+    Passe die Message ""Response"" an ""Human"" an.
+    ##
+    AI:'''
+    return default_prompt
+    # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Prompts")
