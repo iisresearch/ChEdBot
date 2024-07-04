@@ -81,6 +81,7 @@ def load_prompts():
     ##
     Passe die Message ""Response"" an ""Human"" an.
     ##
-    AI:'''
+    AI:
+    '''
     return default_prompt
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Prompts")

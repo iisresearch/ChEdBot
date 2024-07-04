@@ -4,6 +4,7 @@ import time
 import pandas as pd
 import chainlit as cl
 import database as db
+import logging
 from chainlit import user_session
 from chainlit.logger import logger
 from chainlit.input_widget import TextInput
@@ -20,6 +21,7 @@ from chromadb.config import Settings
 from dotenv import load_dotenv
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
 vectordb = None
 
 
@@ -38,9 +40,6 @@ def load_vectordb(init: bool = False):
     VECTORDB_FOLDER = ".vectordb"
     df_character = user_session.get("current_character")
     if not init and vectordb is None:
-        if os.path.exists(VECTORDB_FOLDER):
-            logger.info(f"Deleting existing Vector DB")
-            shutil.rmtree(VECTORDB_FOLDER)
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
             persist_directory=VECTORDB_FOLDER,
@@ -51,6 +50,9 @@ def load_vectordb(init: bool = False):
         else:
             logger.info(f"Vector DB loaded")
     if init:
+        if os.path.exists(VECTORDB_FOLDER):
+            logger.info(f"Deleting existing Vector DB")
+            shutil.rmtree(VECTORDB_FOLDER)
         vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
             documents=load_documents(db.load_dialogues(df_character.id.iloc[0]), page_content_column="utterance"),  # Load dialogue utterances
             embedding=init_embedding_function(),  # Initialize embedding function
@@ -63,8 +65,8 @@ def load_vectordb(init: bool = False):
 
 # Create and return an instance of VectorStoreRetriever for the given context state and score threshold.
 def get_retriever(context_state: str, score_threshold: str, vectordb):
-    character_id = str(user_session.get("current_character")['id'].iloc[0])
-    return VectorStoreRetriever(
+    character_id = int(user_session.get("current_character")['id'].iloc[0])
+    retriever = VectorStoreRetriever(
         vectorstore=vectordb,  # Vector DB
         search_type="similarity_score_threshold",  # Search type
         search_kwargs={  # Search parameters
@@ -83,6 +85,8 @@ def get_retriever(context_state: str, score_threshold: str, vectordb):
             "score_threshold": score_threshold,  # Minimum similarity score
         },
     )
+    logging.info(f"Retriever search_kwargs: {retriever.search_kwargs}")
+    return retriever
 
 
 # Send a message without using LLM, directly sending the content to the user.
@@ -112,7 +116,7 @@ async def start():
         return
     # Load the character's data from Postgres DB, see database.py
     df_character = db.load_character(character_id)
-    print("Available characters:" + str(df_character))
+    logger.info(f"Character data: {df_character}")
 
     await cl.Message(content=f"Welcome to the \n{df_character.name.iloc[0]}\n chatbot! "
                              f"You can now start your conversation.").send()
@@ -223,42 +227,44 @@ async def run(message: cl.Message):
             vectordb,
         )
         document = retriever.get_relevant_documents(query=message_content)
+        logging.info(f"Retrieved documents: {document}")
 
         if len(document) == 1:
-            user_session.set("context_state", document[0].metadata["Contextualisation"])
-            user_session.set("fallback_intent", document[0].metadata["Fallback"])
-            user_session.set("variable_request", document[0].metadata["Variable"])
+            user_session.set("context_state", document[0].metadata["contextualisation"])
+            user_session.set("fallback_intent", document[0].metadata["fallback"])
+            user_session.set("variable_request", document[0].metadata["variable"])
             if (user_session.get("variable_request")) == "":
-                continuation = document[0].metadata["Continuation"]
+                continuation = document[0].metadata["continuation"]
             else:
                 continuation = ""
                 user_session.set(
                     "variable_request_continuation",
-                    document[0].metadata["Continuation"],
+                    document[0].metadata["continuation"],
                 )
-            prompt = document[0].metadata["Prompt"]
+            # prompt = document[0].metadata["prompt"] # TODO: Check if prompts are needed
+            prompt = None
             if not prompt:
                 await sendMessageNoLLM(
                     user_session.get("variable_storage").replace(
-                        document[0].metadata["Response"]
+                        document[0].metadata["response"]
                     ),
-                    document[0].metadata["Role"],
+                    document[0].metadata["character_title"],
                 )
             else:
                 character.prompt = PromptTemplate.from_template(
-                    df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
+                    df_prompts.loc[df_prompts["prompt"] == prompt]["template"].values[0]
                 )
-                character.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
+                character.llm.temperature = df_prompts.loc[df_prompts["prompt"] == prompt][
                     "Temperature"
                 ].values[0]
 
                 response = await character.ainvoke(
                     {
                         "Persona": df_persona.loc[
-                            df_persona["Role"] == document[0].metadata["Role"]
+                            df_persona["character_title"] == document[0].metadata["character_title"]
                             ]["Persona"].values[0],
-                        "Utterance": message_content,
-                        "Response": user_session.get("variable_storage").replace(
+                        "utterance": message_content,
+                        "response": user_session.get("variable_storage").replace(
                             document[0].metadata["Response"]
                         ),
                     },
@@ -266,73 +272,73 @@ async def run(message: cl.Message):
                 )
                 await cl.Message(
                     content=response["text"],
-                    author=document[0].metadata["Role"],
+                    author=document[0].metadata["character_title"],
                 ).send()
         else:
             continuation = user_session.get("fallback_intent")
 
     while continuation != "":
         print(f"Continuation value: {continuation}")
-        document_continuation = vectordb.get(where={"Intent": continuation})
+        document_continuation = vectordb.get(where={"intent": continuation})
 
-        prompt = document_continuation["metadatas"][0]["Prompt"]
+        prompt = document_continuation["metadatas"][0]["prompt"]
         if not prompt:
             await sendMessageNoLLM(
                 user_session.get("variable_storage").replace(
-                    document_continuation["metadatas"][0]["Response"]
+                    document_continuation["metadatas"][0]["response"]
                 ),
-                document_continuation["metadatas"][0]["Role"],
+                document_continuation["metadatas"][0]["character_title"],
             )
         else:
             character.prompt = PromptTemplate.from_template(
-                df_prompts.loc[df_prompts["Prompt"] == prompt]["Template"].values[0]
+                df_prompts.loc[df_prompts["prompt"] == prompt]["template"].values[0]
             )
-            character.llm.temperature = df_prompts.loc[df_prompts["Prompt"] == prompt][
-                "Temperature"
+            character.llm.temperature = df_prompts.loc[df_prompts["prompt"] == prompt][
+                "temperature"
             ].values[0]
 
             response = await character.ainvoke(
                 {
-                    "Persona": df_persona.loc[
-                        df_persona["Role"]
-                        == document_continuation["metadatas"][0]["Role"]
-                        ]["Persona"].values[0],
-                    "Utterance": "",
-                    "Response": user_session.get("variable_storage").replace(
-                        document_continuation["metadatas"][0]["Response"]
+                    "persona": df_persona.loc[
+                        df_persona["character_title"]
+                        == document_continuation["metadatas"][0]["character_title"]
+                        ]["persona"].values[0],
+                    "utterance": "",
+                    "response": user_session.get("variable_storage").replace(
+                        document_continuation["metadatas"][0]["response"]
                     ),
                 },
                 callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)],
             )
             await cl.Message(
                 content=response["text"],
-                author=document_continuation["metadatas"][0]["Role"],
+                author=document_continuation["metadatas"][0]["character_title"],
             ).send()
         user_session.set(
             "context_state",
-            document_continuation["metadatas"][0]["Contextualisation"],
+            document_continuation["metadatas"][0]["contextualisation"],
         )
         user_session.set(
-            "fallback_intent", document_continuation["metadatas"][0]["Fallback"]
+            "fallback_intent", document_continuation["metadatas"][0]["fallback"]
         )
         user_session.set(
-            "variable_request", document_continuation["metadatas"][0]["Variable"]
+            "variable_request", document_continuation["metadatas"][0]["variable"]
         )
         if (user_session.get("variable_request")) == "":
-            continuation = document_continuation["metadatas"][0]["Continuation"]
+            continuation = document_continuation["metadatas"][0]["continuation"]
         else:
             continuation = ""
             user_session.set(
                 "variable_request_continuation",
-                document_continuation["metadatas"][0]["Continuation"],
+                document_continuation["metadatas"][0]["continuation"],
             )
 
 
 # Responds to chat settings updates
 @cl.on_settings_update
 async def setup_character(settings):
-    user_session.set("current_character", settings["Agent"])
-    logger.info(f"Agent changed to {settings['Agent']}")
+    user_session.set("current_character", settings["character"])
+    logger.info(f"Character changed to {settings['character']}")
     await set_character()
 
 
