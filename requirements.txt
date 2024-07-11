@@ -10,6 +10,7 @@ openai
 openpyxl
 tiktoken
 psycopg2 # for postgres
+sentence-transformers # for sentence embeddings HuggingFace
 
 #wikipedia
 #numexpr

@@ -1,12 +1,9 @@
 # Database interactions for the application
 import logging
+import os
 
 import pandas as pd
 import psycopg2
-from psycopg2.extras import RealDictCursor
-import os
-
-from sqlalchemy import create_engine, URL
 
 
 def connect_to_postgres():
@@ -51,7 +48,9 @@ def load_contexts(character_id):
 def load_dialogues(character_id):
     connection = connect_to_postgres()
     query = f"""
-        SELECT message.*, context.name as context_name, character.id as character_id, character.name as character_name, character.description as character_description, character.title as character_title, character."chatbotUrl" as "character_chatbotUrl", character."gameId" as "character_gameId", character.history as "character_history",
+        SELECT message.*, context.name as context_name, character.id as character_id, character.name as character_name, 
+        character.description as character_description, character.title as character_title, 
+        character."chatbotUrl" as "character_chatbotUrl", character."gameId" as "character_gameId", character.history as "character_history",
         character.title as character_title, character.description as character_description
         FROM character
         INNER JOIN context ON character.id = context."characterId"
@@ -66,22 +65,21 @@ def load_dialogues(character_id):
 
 
 def load_persona(df_character):
-    return df_character.description
+    return df_character
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Persona")
 
 
-def load_prompts():
+def load_prompt():
     default_prompt = '''
-    {History}
+    History: {history}
     ##
-    System: {Persona}
+    System: {persona}
     ##
-    Human: {Utterance}
-    Response: {Response}
+    Human: {utterance}
+    Response: {response}
     ##
-    Passe die Message ""Response"" an ""Human"" an.
+    Passe die "Response" an "Human" an.
     ##
-    AI:
-    '''
+    AI: '''
     return default_prompt
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Prompts")
