@@ -7,19 +7,17 @@ from chainlit import user_session
 from chainlit.logger import logger
 # from chainlit.playground.config import add_llm_provider
 from chromadb.config import Settings
-from dotenv import load_dotenv
 from langchain.chains import LLMChain
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain.vectorstores.base import VectorStoreRetriever
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import DataFrameLoader
-from langchain_community.embeddings import SentenceTransformerEmbeddings
-from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
+from langchain_core.runnables import RunnableConfig
+from langchain_huggingface import HuggingFaceEmbeddings, HuggingFaceEndpoint
 
 import database as db
 
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
 vectordb = None
 
@@ -29,8 +27,6 @@ def load_documents(df, page_content_column: str):
     # Iterate over documents to add page_content_column ("response") to metadata
     for doc in documents:
         # Assuming each document has a unique identifier to match with the DataFrame row
-        # This example uses 'id' as the unique identifier. Adjust according to your data structure.
-
         if not doc.metadata.get(page_content_column):
             # Add or update the page_content_column in metadata
             doc.metadata[page_content_column] = doc.page_content
@@ -38,7 +34,7 @@ def load_documents(df, page_content_column: str):
 
 
 def init_embedding_function():
-    return SentenceTransformerEmbeddings(model_name="all-miniLM-L6-v2")
+    return HuggingFaceEmbeddings(model_name="all-miniLM-L6-v2")
     # return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
 
@@ -117,7 +113,7 @@ async def sendMessageNoLLM(content: str, author: str):
 async def start():
     # Get the character ID from the URL query parameter
     character_id = await cl.CopilotFunction(name="url_query_parameter", args={"msg": "character_id"}).acall()
-    print(f"Character ID: {character_id}")
+    logging.info(f"Character ID: {character_id}")
     if not character_id or character_id == "":
         logger.error("No character ID found in the URL query parameter.")
         await cl.Message(content="No character_id provided. Please provide a valid character_id.").send()
@@ -125,9 +121,6 @@ async def start():
     # Load the character's data from Postgres DB, see database.py
     df_character = db.load_character(character_id)
     logger.info(f"Character data: {df_character}")
-
-    await cl.Message(content=f"Welcome to the \n{df_character.name.iloc[0]}\n chatbot! "
-                             f"You can now start your conversation.").send()
 
     if df_character is not None and not df_character.empty:
         settings = await cl.ChatSettings(
@@ -168,8 +161,6 @@ async def set_character():
     user_session.set("chat_memory", chat_memory)
 
     # Check user environment
-    user_env = cl.user_session.get("env")
-    print(f"User env: {user_env}")
     print(f"OpenAI API key: {os.getenv('OPENAI_API_KEY')}")
     openai_api_key = os.getenv("OPENAI_API_KEY") if "OPENAI_API_KEY" in os.environ else cl.user_session.get("env").get("OPENAI_API_KEY")
     huggingfacehub_api_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") if "HUGGINGFACEHUB_API_TOKEN" in os.environ else cl.user_session.get("env").get("HUGGINGFACEHUB_API_TOKEN")
@@ -188,8 +179,17 @@ async def set_character():
         repo_id='meta-llama/Meta-Llama-3-8B-Instruct',
         huggingfacehub_api_token=huggingfacehub_api_token,
         task="text-generation",
-        temperature=0.7,
+        temperature=0.2,
+        repetition_penalty=1.03,
+        stop_sequences=["<|start_header_id|>",
+            "<|end_of_text|>",
+            "#", # This will stop the generation of irrelevant text as in the prompt after ##
+            #"<|end_header_id|>",
+            # "<|reserved_special_token"
+            "<|eot_id|>"],
+        # max_new_tokens=100,
         streaming=True,
+        verbose=True,
     )
 
     # Initialize the LLMChain with the default prompt, LLM, and chat memory.
@@ -202,9 +202,11 @@ async def set_character():
             memory=chat_memory,
         ),
     )
+    character = user_session.get('current_character')
     # Send a welcome message to the user
     await cl.Message(
-        content=f"Welcome to the {user_session.get('current_character')} chatbot! You can now start your conversation."
+        content=f"Welcome to {character['name'].iloc[0]}! {character['name'].iloc[0]} is a {character['title'].iloc[0]}. "
+                f"You can now start your conversation."
     ).send()
     # add_llm_provider(AzureOpenAIProvider)
 
@@ -225,7 +227,7 @@ async def run(message: cl.Message):
     character = user_session.get("llm_chain")
     df_character = user_session.get("current_character")
     # Conversation continuation is handled based on predefined intents and fallback mechanisms.
-    # It dynamically adjusts the conv. context, intents, and response prompts based on user interations and the result of similarity searches. 
+    # It dynamically adjusts the conv. context, intents, and response prompts based on user interations and the result of similarity searches.
     if (user_session.get("variable_request")) != "":
         continuation = user_session.get("variable_request_continuation")
         user_session.get("variable_storage").add(
@@ -254,9 +256,9 @@ async def run(message: cl.Message):
                     document[0].metadata["continuation"],
                 )
             # prompt = document[0].metadata["prompt"] # TODO: Check if prompts are needed
-            # prompt = prompt
+            # prompt = None
 
-            if prompt is not None:
+            if document[0].metadata.get("response"):
                 await sendMessageNoLLM(
                     user_session.get("variable_storage").replace(
                         document[0].metadata["response"]
@@ -265,27 +267,30 @@ async def run(message: cl.Message):
                 )
             else:
                 character.prompt = PromptTemplate.from_template(
-                    prompt
+                    db.load_prompt()
                 )
-                character.llm.temperature = 0.2  # df_prompts.loc[df_prompts["prompt"] == prompt]["Temperature"].values[0]
+                # character.llm.temperature = 0.2  # df_prompts.loc[df_prompts["prompt"] == prompt]["Temperature"].values[0]
                 logger.info(f"After retrieval: \n Character: {character}\n\n llm_chain: {character.llm}\n\nPrompt: {character.prompt}")
 
-                response = await character.acall(
+                response = character.astream(
                     {
                         "persona": df_character.loc[
-                            df_character["character_title"] == document[0].metadata["character_title"]
-                            ]["character_description"].values[0],
+                            df_character["title"] == document[0].metadata["character_title"]
+                            ]["description"].values[0],
                         "utterance": message_content,
                         "response": user_session.get("variable_storage").replace(
                             document[0].metadata["response"]
                         ),
                     },
-                    callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)],
+                    config=RunnableConfig(callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)]),
                 )
-                await cl.Message(
-                    content=response["text"],
-                    author=document[0].metadata["character_title"],
-                ).send()
+                msg = cl.Message(
+                    content="", # response["text"],
+                    author=document[0].metadata["character_title"])
+                await msg.send()
+                async for token in response:
+                    await msg.stream_token(token['text'])
+                await msg.update()
         else:
             continuation = user_session.get("fallback_intent")
 
@@ -294,8 +299,9 @@ async def run(message: cl.Message):
         document_continuation = vectordb.get(where={"intent": int(continuation)})
         logger.info(f"Continuation document: \n{document_continuation}")
         # document_continuation["metadatas"][0]["prompt"]
-        prompt = None  # TODO: Check if prompts are needed
-        if prompt is None:
+
+        # prompt = None  # TODO: Check if prompts are needed
+        if document_continuation.get('metadatas')[0].get("response"):
             await sendMessageNoLLM(
                 user_session.get("variable_storage").replace(
                     document_continuation["metadatas"][0]["response"]
@@ -303,13 +309,10 @@ async def run(message: cl.Message):
                 document_continuation["metadatas"][0]["character_title"],
             )
         else:
-            character.prompt = PromptTemplate.from_template(
-                template=prompt  # df_prompts['prompt'].values[0]  # df_prompts.loc[df_prompts["prompt"] == prompt]["template"].values[0]
-            )
-            character.llm.temperature = 0.2  # df_prompts.loc[df_prompts["prompt"] == prompt]["temperature"].values[0]
+            # character.llm.temperature = 0.2  # df_prompts.loc[df_prompts["prompt"] == prompt]["temperature"].values[0]
 
-            logger.info(f"Character: {character}\n\n llm_chain: {character.llm}\n\nPrompt: {character.prompt}")
-            response = await character.ainvoke(
+            logger.info(f"\n\nCharacter: {character}\n\nLLM_Chain: {character.llm}\n\nPrompt: {character.prompt}")
+            response = character.astream(
                 {
                     "persona": df_character.loc[
                         df_character["title"] == document_continuation["metadatas"][0]["character_title"]
@@ -320,12 +323,16 @@ async def run(message: cl.Message):
                     ),
                     "history": df_character["history"]
                 },
-                callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)],
+                config=RunnableConfig(callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)]),
             )
-            await cl.Message(
-                content=response["text"],  # Changed from "text" to "response" to pass directly the response
+            msg = cl.Message(
+                content="", # response["text"],
                 author=document_continuation["metadatas"][0]["character_title"],
-            ).send()
+            )
+            await msg.send()
+            async for token in response:
+                await msg.stream_token(token['text'])
+            await msg.update()
         user_session.set(
             "context_state",
             document_continuation["metadatas"][0]["contextualisation"],
