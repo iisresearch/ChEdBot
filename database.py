@@ -71,6 +71,7 @@ def load_persona(df_character):
 
 def load_prompt():
     default_prompt = '''
+    ##
     History: {history}
     ##
     System: {persona}
