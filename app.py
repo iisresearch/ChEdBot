@@ -57,8 +57,9 @@ def load_vectordb(init: bool = False):
     if init:
         if os.path.exists(VECTORDB_FOLDER):
             logger.info(f"Deleting existing Vector DB")
-            vectordb.delete_collection()
-            # shutil.rmtree(VECTORDB_FOLDER)
+            vectordb.reset_collection()
+            #import shutil
+            #shutil.rmtree(VECTORDB_FOLDER)
         docs = load_documents(db.load_dialogues(df_character.id.iloc[0]), page_content_column="utterance")
         vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
             documents=docs,  # Load dialogue utterances
