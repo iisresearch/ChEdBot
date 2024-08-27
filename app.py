@@ -210,11 +210,8 @@ async def set_character():
 
     # Check user environment
     print(f"OpenAI API key: {os.getenv('OPENAI_API_KEY')}")
-    openai_api_key = os.getenv("OPENAI_API_KEY") if "OPENAI_API_KEY" in os.environ else cl.user_session.get("env").get(
-        "OPENAI_API_KEY")
-    huggingfacehub_api_token = os.getenv(
-        "HUGGINGFACEHUB_API_TOKEN") if "HUGGINGFACEHUB_API_TOKEN" in os.environ else cl.user_session.get("env").get(
-        "HUGGINGFACEHUB_API_TOKEN")
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    huggingfacehub_api_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
     # Sets the LLM and env vars
 
     llm = AzureChatOpenAI(
