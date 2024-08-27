@@ -1,7 +1,18 @@
-pandas==1.2.5
-chromadb==0.4.18
-chainlit==0.7.700
-langchain==0.0.342
-openai==1.3.6
-openpyxl==3.1.2
-tiktoken==0.5.1
+pandas
+chromadb
+chainlit==1.1.300rc4 # Only 300rc4 works for query params
+langchain
+langchain-community
+langchain-chroma
+langchain-core
+langchain-openai
+langchain-huggingface
+openai
+openpyxl
+tiktoken
+psycopg2 # for postgres
+
+#wikipedia
+#numexpr
+langchainhub
+#youtube-transcript-api
