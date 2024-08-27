@@ -15,6 +15,7 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_community.document_loaders import DataFrameLoader
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig, RunnableWithMessageHistory
 from langchain_openai import AzureChatOpenAI
 # from langchain_huggingface import HuggingFaceEndpointEmbeddings
