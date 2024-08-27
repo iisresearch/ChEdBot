@@ -12,12 +12,13 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.vectorstores.base import VectorStoreRetriever
 from langchain_chroma import Chroma
 from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_community.chat_models import AzureChatOpenAI
 from langchain_community.document_loaders import DataFrameLoader
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableConfig, RunnableWithMessageHistory
-from langchain_huggingface import HuggingFaceEndpointEmbeddings
+from langchain_openai import AzureChatOpenAI
+# from langchain_huggingface import HuggingFaceEndpointEmbeddings
+from langchain_openai import AzureOpenAIEmbeddings
 
 import database as db
 
@@ -37,9 +38,8 @@ def load_documents(df, page_content_column: str):
 
 
 def init_embedding_function():
-    return HuggingFaceEndpointEmbeddings(model="all-miniLM-L6-v2",
-                                         huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
-    # return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
+    #return HuggingFaceEndpointEmbeddings(model="all-miniLM-L6-v2", huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+    return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
 
 # Initialize a Vector DB using Chroma. Store and retrieve embeddings of dialogue utterances for efficient similarity
@@ -66,7 +66,7 @@ def load_vectordb(init: bool = False):
                 client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
             )
             logger.info(f"Deleting existing Vector DB")
-            vectordb.reset_collection()
+            vectordb.delete_collection()
             # import shutil
             # shutil.rmtree(VECTORDB_FOLDER)
         docs = load_documents(db.load_dialogues(df_character.id.iloc[0]), page_content_column="utterance")
