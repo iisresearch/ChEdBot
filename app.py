@@ -162,6 +162,30 @@ async def start():
     load_vectordb(True)
     await set_character()
 
+# Here we use a global variable to store the chat message history.
+# This will make it easier to inspect it to see the underlying results.
+store = {}
+
+def get_session_history(session_id: str) -> BaseChatMessageHistory:
+    if session_id not in store:
+        store[session_id] = ChatMessageHistory()
+    return store[session_id]
+
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.messages import BaseMessage
+from langchain_core.pydantic_v1 import BaseModel, Field
+from typing import List
+class InMemoryHistory(BaseChatMessageHistory, BaseModel):
+    """In memory implementation of chat message history."""
+
+    messages: List[BaseMessage] = Field(default_factory=list)
+
+    def add_messages(self, messages: List[BaseMessage]) -> None:
+        """Add a list of messages to the store"""
+        self.messages.extend(messages)
+
+    def clear(self) -> None:
+        self.messages = []
 
 @cl.step(name="set_character", type="llm", show_input=True)
 async def set_character():
@@ -203,8 +227,31 @@ async def set_character():
     )
 
     # Initialize the LLMChain with the default prompt, LLM, and chat memory.
-    prompt = ChatPromptTemplate.from_template(db.load_prompt())
-    chain = prompt | llm | StrOutputParser()
+    prompt = ChatPromptTemplate.from_template(
+        db.load_prompt()
+        # [
+        #     MessagesPlaceholder(variable_name="history"),
+        #     ("system", '''{persona} ## Passe die 'Response" an "Human" an. ##'''),
+        #     ("human", "{utterance}"),
+        #     ("response", "{response}"),
+        #     ("ai", ""),
+        # ]
+    )
+    from langchain_core.runnables import RunnablePassthrough
+    from langchain_core.runnables import RunnableLambda
+    from operator import itemgetter
+    chain = RunnablePassthrough.assign(
+            history=RunnableLambda(chat_memory.load_memory_variables) | itemgetter("history")
+    ) | prompt | llm | StrOutputParser()
+
+    chain_with_history = RunnableWithMessageHistory(
+        chain,
+        # Uses the get_session_history function defined in the example above.
+        get_session_history,
+        input_messages_key="utterance",
+        history_messages_key="history",
+    )
+
     user_session.set(
         "llm_chain",
         chain,
@@ -233,6 +280,7 @@ async def run(message: cl.Message):
     # df_persona = user_session.get("df_persona")
     character = user_session.get("llm_chain")
     df_character = user_session.get("current_character")
+    chat_memory = user_session.get("chat_memory")
     settings = user_session.get("settings")
     model_settings = settings["Model"]
     print(f"Model settings: {model_settings}")
@@ -291,7 +339,7 @@ async def run(message: cl.Message):
                         "response": user_session.get("variable_storage").replace(
                             document[0].metadata["response"]
                         ),
-                        "history": df_character["history"],
+                        "history":  chat_memory.load_memory_variables(inputs=["history"]),
                     },
                     config=RunnableConfig(callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)]),
                 )
@@ -329,7 +377,7 @@ async def run(message: cl.Message):
                     "response": user_session.get("variable_storage").replace(
                         document_continuation["metadatas"][0]["response"]
                     ),
-                    "history": df_character["history"]
+                    "history": chat_memory.load_memory_variables(),
                 },
                 config=RunnableConfig(callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)]),
             )
@@ -339,6 +387,7 @@ async def run(message: cl.Message):
             )
             async for token in response:
                 await msg.stream_token(token)
+            chat_memory.add_message(character.llm.get_last_message())
             await msg.send()
         user_session.set(
             "context_state",
