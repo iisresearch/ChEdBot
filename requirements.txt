@@ -12,7 +12,5 @@ openpyxl
 tiktoken
 psycopg2 # for postgres
 
-#wikipedia
-#numexpr
 langchainhub
 #youtube-transcript-api

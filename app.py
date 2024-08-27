@@ -11,12 +11,13 @@ from chromadb.config import Settings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.vectorstores.base import VectorStoreRetriever
 from langchain_chroma import Chroma
+from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_community.chat_models import AzureChatOpenAI
 from langchain_community.document_loaders import DataFrameLoader
+from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableConfig
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.runnables import RunnableConfig, RunnableWithMessageHistory
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
 import database as db
 
@@ -36,7 +37,8 @@ def load_documents(df, page_content_column: str):
 
 
 def init_embedding_function():
-    return HuggingFaceEmbeddings(model_name="all-miniLM-L6-v2")
+    return HuggingFaceEndpointEmbeddings(model="all-miniLM-L6-v2",
+                                         huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
     # return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
 
