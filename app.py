@@ -11,12 +11,10 @@ from chromadb.config import Settings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.vectorstores.base import VectorStoreRetriever
 from langchain_chroma import Chroma
-from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_community.document_loaders import DataFrameLoader
-from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableConfig, RunnableWithMessageHistory
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import AzureChatOpenAI
 # from langchain_huggingface import HuggingFaceEndpointEmbeddings
 from langchain_openai import AzureOpenAIEmbeddings
@@ -162,32 +160,8 @@ async def start():
     load_vectordb(True)
     await set_character()
 
-# Here we use a global variable to store the chat message history.
-# This will make it easier to inspect it to see the underlying results.
-store = {}
 
-def get_session_history(session_id: str) -> BaseChatMessageHistory:
-    if session_id not in store:
-        store[session_id] = ChatMessageHistory()
-    return store[session_id]
-
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import BaseMessage
-from langchain_core.pydantic_v1 import BaseModel, Field
-from typing import List
-class InMemoryHistory(BaseChatMessageHistory, BaseModel):
-    """In memory implementation of chat message history."""
-
-    messages: List[BaseMessage] = Field(default_factory=list)
-
-    def add_messages(self, messages: List[BaseMessage]) -> None:
-        """Add a list of messages to the store"""
-        self.messages.extend(messages)
-
-    def clear(self) -> None:
-        self.messages = []
-
-@cl.step(name="set_character", type="llm", show_input=True)
+@cl.step
 async def set_character():
     df_character = user_session.get("current_character")
     # user_session.set("context_state", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Context"].iloc[0])
@@ -195,7 +169,6 @@ async def set_character():
     print(f"Context state: {user_session.get("context_state")}")
     # user_session.set("score_threshold", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Threshold"].iloc[0])
     user_session.set("score_threshold", 0.3)  # Set the similarity score threshold for the user
-    user_session.set("df_prompts", db.load_prompt())
     # user_session.set("df_persona", df_character)  # db.load_persona(df_character)
     user_session.set("variable_storage", VariableStorage())
     user_session.set("variable_request", "")
@@ -224,30 +197,16 @@ async def set_character():
     )
 
     # Initialize the LLMChain with the default prompt, LLM, and chat memory.
-    prompt = ChatPromptTemplate.from_template(
-        db.load_prompt()
-        # [
-        #     MessagesPlaceholder(variable_name="history"),
-        #     ("system", '''{persona} ## Passe die 'Response" an "Human" an. ##'''),
-        #     ("human", "{utterance}"),
-        #     ("response", "{response}"),
-        #     ("ai", ""),
-        # ]
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", "{persona} \n {history} \nPasse die folgende 'Response' an 'human' an. \n Response: {response}"),
+            ("human", "{utterance}"),
+            ("ai", ""),
+        ]
     )
-    from langchain_core.runnables import RunnablePassthrough
-    from langchain_core.runnables import RunnableLambda
-    from operator import itemgetter
-    chain = RunnablePassthrough.assign(
-            history=RunnableLambda(chat_memory.load_memory_variables) | itemgetter("history")
-    ) | prompt | llm | StrOutputParser()
+    user_session.set("df_prompts", prompt)
 
-    chain_with_history = RunnableWithMessageHistory(
-        chain,
-        # Uses the get_session_history function defined in the example above.
-        get_session_history,
-        input_messages_key="utterance",
-        history_messages_key="history",
-    )
+    chain =  prompt | llm | StrOutputParser()
 
     user_session.set(
         "llm_chain",
@@ -259,8 +218,6 @@ async def set_character():
         content=f"Welcome to {character['name'].iloc[0]}! {character['name'].iloc[0]} is a {character['title'].iloc[0]}. "
                 f"You can now start your conversation."
     ).send()
-    # add_llm_provider(AzureOpenAIProvider)
-
 
 # Core logic happens in run() for handling incoming messages and generating responses. Vector DB finds the best match
 # for the user's message based on similarity. If found, it's formatted and sent back to the user. /reload command
@@ -321,10 +278,6 @@ async def run(message: cl.Message):
                     document[0].metadata["character_title"],
                 )
             else:
-                # character.prompt = PromptTemplate.from_template(
-                #     db.load_prompt()
-                # )
-                # character.llm.temperature = 0.2  # df_prompts.loc[df_prompts["prompt"] == prompt]["Temperature"].values[0]
                 logger.info(f"After retrieval: \n Character: {character}\n\n")
 
                 response = character.astream(
@@ -336,7 +289,7 @@ async def run(message: cl.Message):
                         "response": user_session.get("variable_storage").replace(
                             document[0].metadata["response"]
                         ),
-                        "history":  chat_memory.load_memory_variables(inputs=["history"]),
+                        "history":  chat_memory.load_memory_variables(inputs={"utterance": message.content}),
                     },
                     config=RunnableConfig(callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)]),
                 )
@@ -345,12 +298,16 @@ async def run(message: cl.Message):
                     author=document[0].metadata["character_title"])
                 async for token in response:
                     await msg.stream_token(token)
+                # Set History
+                chat_memory.save_context({"utterance": message.content}, {"response": msg.content})
+                logger.info(chat_memory.load_memory_variables(inputs={"utterance": message.content}))
                 await msg.send()
         else:
             continuation = user_session.get("fallback_intent")
 
     while continuation != "":
-        print(f"Continuation value: {continuation}")
+        logger.info(f"Continuation value: {continuation}")
+
         document_continuation = vectordb.get(where={"intent": int(continuation)})
         logger.info(f"Continuation document: \n{document_continuation}")
         # document_continuation["metadatas"][0]["prompt"]
@@ -362,8 +319,6 @@ async def run(message: cl.Message):
                 document_continuation["metadatas"][0]["character_title"],
             )
         else:
-            # character.llm.temperature = 0.2  # df_prompts.loc[df_prompts["prompt"] == prompt]["temperature"].values[0]
-
             logger.info(f"\n\nCharacter: {character}\n\n")
             response = character.astream(
                 {
@@ -374,7 +329,7 @@ async def run(message: cl.Message):
                     "response": user_session.get("variable_storage").replace(
                         document_continuation["metadatas"][0]["response"]
                     ),
-                    "history": chat_memory.load_memory_variables(),
+                    "history": chat_memory.load_memory_variables(inputs={"utterance": message.content}),
                 },
                 config=RunnableConfig(callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)]),
             )
@@ -384,7 +339,8 @@ async def run(message: cl.Message):
             )
             async for token in response:
                 await msg.stream_token(token)
-            chat_memory.add_message(character.llm.get_last_message())
+            chat_memory.save_context({"utterance": message.content}, {"response": msg.content})
+            logger.info(chat_memory.load_memory_variables(inputs={"utterance": message.content}))
             await msg.send()
         user_session.set(
             "context_state",

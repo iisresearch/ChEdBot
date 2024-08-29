@@ -1,6 +1,6 @@
 pandas
 chromadb
-chainlit==1.1.300rc4 # Only 300rc4 works for query params
+chainlit
 langchain
 langchain-community
 langchain-chroma

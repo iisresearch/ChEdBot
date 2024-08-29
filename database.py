@@ -68,19 +68,3 @@ def load_persona(df_character):
     return df_character
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Persona")
 
-
-def load_prompt():
-    default_prompt = '''
-    ##
-    History: {history}
-    ##
-    System: {persona}
-    ##
-    Human: {utterance}
-    Response: {response}
-    ##
-    Passe die "Response" an "Human" an.
-    ##
-    AI: '''
-    return default_prompt
-    # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Prompts")
