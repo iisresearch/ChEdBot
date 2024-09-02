@@ -37,7 +37,7 @@ def load_documents(df, page_content_column: str):
 
 
 def init_embedding_function():
-    #return HuggingFaceEndpointEmbeddings(model="all-miniLM-L6-v2", huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+    # return HuggingFaceEndpointEmbeddings(model="all-miniLM-L6-v2", huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
     return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
 
@@ -64,14 +64,17 @@ def load_vectordb(init: bool = False):
                 persist_directory=VECTORDB_FOLDER,
                 client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
             )
-            logger.info(f"Deleting existing Vector DB")
-            vectordb.delete_collection()
-            # import shutil
-            # shutil.rmtree(VECTORDB_FOLDER)
-        docs = load_documents(db.load_dialogues(df_character.id.iloc[0]), page_content_column="utterance")
+            character_docs = vectordb.get(where={"character_id": int(df_character.id.iloc[0])})
+            logger.info(f"Character docs: {character_docs}")
+            if character_docs.get("ids"):
+                vectordb.delete(character_docs.get("ids"))
+                logger.info(f"Deleted existing Vector DB for character {df_character.id.iloc[0]}")
+            else:
+                logger.info(f"No existing Vector DB found for character {df_character.id.iloc[0]}")
+        # Load latest data from Postgres DB for the current character
+        docs = load_documents(db.load_dialogues(int(df_character.id.iloc[0])), page_content_column="utterance")
         vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
             documents=docs,  # Load dialogue utterances
-            collection_name="chatbot",  # Collection name
             embedding=init_embedding_function(),  # Initialize embedding function
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
@@ -105,7 +108,7 @@ def get_retriever(context_state: str, score_threshold: str, vectordb):
 
 
 # Send a message without using LLM, directly sending the content to the user.
-async def sendMessageNoLLM(content: str, author: str):
+async def send_message_no_llm(content: str, author: str):
     msg = cl.Message(
         content="",
         author=author,
@@ -158,6 +161,8 @@ async def start():
             "No available characters found in df_character. Please check the Postgres DB for the 'Character' table.")
         return
     load_vectordb(True)
+    set_starters(int(character_id))
+
     await set_character()
 
 
@@ -165,7 +170,7 @@ async def start():
 async def set_character():
     df_character = user_session.get("current_character")
     # user_session.set("context_state", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Context"].iloc[0])
-    user_session.set("context_state", db.load_contexts(df_character.id.iloc[0])['name'].iloc[0])
+    user_session.set("context_state", db.load_contexts(int(df_character.id.iloc[0]))['name'].iloc[0])
     print(f"Context state: {user_session.get("context_state")}")
     # user_session.set("score_threshold", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Threshold"].iloc[0])
     user_session.set("score_threshold", 0.3)  # Set the similarity score threshold for the user
@@ -173,6 +178,8 @@ async def set_character():
     user_session.set("variable_storage", VariableStorage())
     user_session.set("variable_request", "")
     user_session.set("variable_request_continuation", "")
+    character = user_session.get('current_character')
+
     # Chat memory is managed using ConversationBufferWindowMemory, helping in maintaining context throughout the chat.
     chat_memory = ConversationBufferWindowMemory(
         memory_key="history",
@@ -199,25 +206,26 @@ async def set_character():
     # Initialize the LLMChain with the default prompt, LLM, and chat memory.
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", "{persona} \n {history} \nPasse die folgende 'Response' an 'human' an. \n Response: {response}"),
+            ("system", "{persona} \n {history} \nPasse die folgende 'Response' an 'human' an. Nur formuliere die 'Response' ohne irrelevante informationen um. \n Response: {response}"),
             ("human", "{utterance}"),
             ("ai", ""),
         ]
     )
     user_session.set("df_prompts", prompt)
 
-    chain =  prompt | llm | StrOutputParser()
+    chain = prompt | llm | StrOutputParser()
 
     user_session.set(
         "llm_chain",
         chain,
     )
-    character = user_session.get('current_character')
+
     # Send a welcome message to the user
-    await cl.Message(
-        content=f"Welcome to {character['name'].iloc[0]}! {character['name'].iloc[0]} is a {character['title'].iloc[0]}. "
-                f"You can now start your conversation."
-    ).send()
+    # await cl.Message(
+    #     content=f"Welcome to {character['name'].iloc[0]}! {character['name'].iloc[0]} is a {character['title'].iloc[0]}. "
+    #             f"You can now start your conversation."
+    # ).send()
+
 
 # Core logic happens in run() for handling incoming messages and generating responses. Vector DB finds the best match
 # for the user's message based on similarity. If found, it's formatted and sent back to the user. /reload command
@@ -227,7 +235,7 @@ async def run(message: cl.Message):
     message_content = message.content
     global vectordb
     if message_content == "/reload":
-        vectordb = load_vectordb(True)
+        load_vectordb(True)
         return await cl.Message(content="Data loaded").send()
 
     prompt = user_session.get("df_prompts")
@@ -271,7 +279,7 @@ async def run(message: cl.Message):
             # prompt = None
 
             if not model_settings and document[0].metadata.get("response"):
-                await sendMessageNoLLM(
+                await send_message_no_llm(
                     user_session.get("variable_storage").replace(
                         document[0].metadata["response"]
                     ),
@@ -289,7 +297,7 @@ async def run(message: cl.Message):
                         "response": user_session.get("variable_storage").replace(
                             document[0].metadata["response"]
                         ),
-                        "history":  chat_memory.load_memory_variables(inputs={"utterance": message.content}),
+                        "history": chat_memory.load_memory_variables(inputs={"utterance": message.content}),
                     },
                     config=RunnableConfig(callbacks=[cl.AsyncLangchainCallbackHandler(stream_final_answer=True)]),
                 )
@@ -312,7 +320,7 @@ async def run(message: cl.Message):
         logger.info(f"Continuation document: \n{document_continuation}")
         # document_continuation["metadatas"][0]["prompt"]
         if not model_settings and document_continuation.get('metadatas')[0].get("response"):
-            await sendMessageNoLLM(
+            await send_message_no_llm(
                 user_session.get("variable_storage").replace(
                     document_continuation["metadatas"][0]["response"]
                 ),
@@ -368,6 +376,44 @@ async def run(message: cl.Message):
 #     user_session.set("current_character", settings["character"])
 #     logger.info(f"Character changed to {settings['character']}")
 #     await set_character()
+
+
+@cl.set_starters
+def set_starters(character_id:int):
+    # character_id = int(cl.user_session.get("character_id"))
+    if not vectordb:
+        load_vectordb()
+    #character_id = int(character_id)
+    print(f"Character ID: {character_id}")
+    docs = vectordb.get(where={
+        "$and": [
+            {"utterance": {"$ne": ""}},  # Filter out empty utterances
+            {"context_name": {"$eq": "Start"}},
+            #{"character_id": {"$eq": character_id}}
+        ]
+    }, )
+    # for i, doc in enumerate(docs.get('documents')):
+    #     print(i, doc)
+    #     if docs.get('metadatas')[i-1].get("character_id") != character_id:
+    #         docs.get('metadatas').pop(i-1)
+    #         docs.get('documents').pop(i-1)
+    #logger.info(f"Starters: {docs.get('documents')[0]}\n")
+    if not docs.get('documents'):
+        logger.error("No documents found for starters.")
+        return []
+
+    starters = []
+    for i, icon in enumerate(["/public/idea.svg", "/public/science.svg", "/public/learn.svg", "/public/terminal.svg"]):
+        if i < len(docs.get('documents')):
+            print(f"Starter: {docs.get('documents')[i]}")
+            starters.append(
+                cl.Starter(
+                    label=docs.get('documents')[i],
+                    message=docs.get('documents')[i],
+                    icon=icon,
+                )
+            )
+    return starters
 
 
 # VariableStorage manages and utilizes variables within the chatbot's conversations and responses
