@@ -8,7 +8,7 @@ enable_telemetry = true
 id = "ChEdBot-ZEfU7QTMoLeq"
 
 # List of environment variables to be provided by each user to use the app.
-user_env = ["OPENAI_API_KEY"]
+# user_env = ["OPENAI_API_KEY"]
 
 # Duration (in seconds) during which the session is saved when the connection is lost
 session_timeout = 3600
@@ -34,7 +34,7 @@ auto_tag_thread = true
 
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
-    enabled = true
+    enabled = false
     accept = ["*/*"]
     max_files = 20
     max_size_mb = 500
@@ -64,7 +64,7 @@ name = "ChEdBot"
 default_collapse_content = true
 
 # Hide the chain of thought details from the user in the UI.
-hide_cot = false
+cot = "hidden"
 
 # Link to your github repo. This will add a github button in the UI's header.
 # github = ""
@@ -89,7 +89,7 @@ custom_js = "/public/test.js"
 # custom_build = "./public/build"
 
 [UI.theme]
-    default = "dark"
+    default = "light"
     #layout = "wide"
     #font_family = "Inter, sans-serif"
 # Override default MUI light theme. (Check theme.ts)
