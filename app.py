@@ -108,7 +108,7 @@ def get_retriever(context_state: str, score_threshold: str, vectordb):
 
 
 # Send a message without using LLM, directly sending the content to the user.
-async def send_message_no_llm(content: str, author: str):
+async def send_message_no_llm(content: str, author: str, user_message: cl.Message):
     msg = cl.Message(
         content="",
         author=author,
@@ -119,6 +119,12 @@ async def send_message_no_llm(content: str, author: str):
         await msg.stream_token(token)
         if i < len(tokens) - 1:
             await msg.stream_token(" ")
+
+    chat_memory = cl.user_session.get("chat_memory")
+    chat_memory.save_context({"utterance": user_message.content}, {"response": msg.content})
+
+    logger.info(chat_memory.load_memory_variables(inputs={"utterance": user_message.content}))
+
     await msg.send()
 
 
@@ -173,7 +179,7 @@ async def set_character():
     user_session.set("context_state", db.load_contexts(int(df_character.id.iloc[0]))['name'].iloc[0])
     print(f"Context state: {user_session.get("context_state")}")
     # user_session.set("score_threshold", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Threshold"].iloc[0])
-    user_session.set("score_threshold", 0.3)  # Set the similarity score threshold for the user
+    user_session.set("score_threshold", 0.7)  # Set the similarity score threshold for the user
     # user_session.set("df_persona", df_character)  # db.load_persona(df_character)
     user_session.set("variable_storage", VariableStorage())
     user_session.set("variable_request", "")
@@ -206,7 +212,10 @@ async def set_character():
     # Initialize the LLMChain with the default prompt, LLM, and chat memory.
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", "{persona} \n {history} \nPasse die folgende 'Response' an 'human' an. Nur formuliere die 'Response' ohne irrelevante informationen um. \n Response: {response}"),
+            ("system", "Passe die folgende 'Response' an 'human' an. Erfinde keine Informationen, die nicht in der 'Response', 'Persona' oder 'history' enthalten sind. \n"
+            "Response: {response} \n"
+            "Persona: {persona} \n "
+            "{history} \n"),
             ("human", "{utterance}"),
             ("ai", ""),
         ]
@@ -284,7 +293,9 @@ async def run(message: cl.Message):
                         document[0].metadata["response"]
                     ),
                     document[0].metadata["character_title"],
+                    message
                 )
+
             else:
                 logger.info(f"After retrieval: \n Character: {character}\n\n")
 
@@ -325,6 +336,7 @@ async def run(message: cl.Message):
                     document_continuation["metadatas"][0]["response"]
                 ),
                 document_continuation["metadatas"][0]["character_title"],
+                message
             )
         else:
             logger.info(f"\n\nCharacter: {character}\n\n")
