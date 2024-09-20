@@ -167,7 +167,6 @@ async def start():
             "No available characters found in df_character. Please check the Postgres DB for the 'Character' table.")
         return
     load_vectordb(True)
-    set_starters(int(character_id))
 
     await set_character()
 
@@ -388,45 +387,6 @@ async def run(message: cl.Message):
 #     user_session.set("current_character", settings["character"])
 #     logger.info(f"Character changed to {settings['character']}")
 #     await set_character()
-
-
-@cl.set_starters
-def set_starters(character_id:int):
-    # character_id = int(cl.user_session.get("character_id"))
-    if not vectordb:
-        load_vectordb()
-    #character_id = int(character_id)
-    print(f"Character ID: {character_id}")
-    docs = vectordb.get(where={
-        "$and": [
-            {"utterance": {"$ne": ""}},  # Filter out empty utterances
-            {"context_name": {"$eq": "Start"}},
-            #{"character_id": {"$eq": character_id}}
-        ]
-    }, )
-    # for i, doc in enumerate(docs.get('documents')):
-    #     print(i, doc)
-    #     if docs.get('metadatas')[i-1].get("character_id") != character_id:
-    #         docs.get('metadatas').pop(i-1)
-    #         docs.get('documents').pop(i-1)
-    #logger.info(f"Starters: {docs.get('documents')[0]}\n")
-    if not docs.get('documents'):
-        logger.error("No documents found for starters.")
-        return []
-
-    starters = []
-    for i, icon in enumerate(["/public/idea.svg", "/public/science.svg", "/public/learn.svg", "/public/terminal.svg"]):
-        if i < len(docs.get('documents')):
-            print(f"Starter: {docs.get('documents')[i]}")
-            starters.append(
-                cl.Starter(
-                    label=docs.get('documents')[i],
-                    message=docs.get('documents')[i],
-                    icon=icon,
-                )
-            )
-    return starters
-
 
 # VariableStorage manages and utilizes variables within the chatbot's conversations and responses
 class VariableStorage:
