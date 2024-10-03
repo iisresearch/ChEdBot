@@ -37,7 +37,7 @@ def load_documents(df, page_content_column: str):
 
 
 def init_embedding_function():
-    # return HuggingFaceEndpointEmbeddings(model="all-miniLM-L6-v2", huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+    # return HuggingFaceEndpointEmbeddings(model="sentence-transformers/all-MiniLM-L6-v2", huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"))
     return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
 
@@ -79,7 +79,7 @@ def load_vectordb(init: bool = False):
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
         )
-        logger.info(f"Vector DB initialised")
+        logger.info(f"Vector DB loaded")
     return vectordb
 
 
@@ -151,7 +151,7 @@ async def start():
             [  # Set the chat settings for the user if needed
                 cl.input_widget.Switch(
                     id="Model",
-                    label="Use LLM",
+                    label="Use LLM (experimental)",
                     initial=False,
                 ),
                 # TextInput(id="Agent", label="Agent", initial=available_characters[0]),
@@ -211,10 +211,11 @@ async def set_character():
     # Initialize the LLMChain with the default prompt, LLM, and chat memory.
     prompt = ChatPromptTemplate.from_messages(
         [
-            ("system", "Passe die folgende 'Response' an 'human' an. Erfinde keine Informationen, die nicht in der 'Response', 'Persona' oder 'history' enthalten sind. \n"
-            "Response: {response} \n"
-            "Persona: {persona} \n "
-            "{history} \n"),
+            ("system",
+             "Passe die folgende 'Response' an 'human' an. Erfinde keine Informationen, die nicht in der 'Response', 'Persona' oder 'history' enthalten sind. \n"
+             "Response: {response} \n"
+             "Persona: {persona} \n "
+             "{history} \n"),
             ("human", "{utterance}"),
             ("ai", ""),
         ]
@@ -255,7 +256,7 @@ async def run(message: cl.Message):
     model_settings = settings["Model"]
     print(f"Model settings: {model_settings}")
     # Conversation continuation is handled based on predefined intents and fallback mechanisms.
-    # It dynamically adjusts the conv. context, intents, and response prompts based on user interations and the result of similarity searches.
+    # It dynamically adjusts the conv. context, intents, and response prompts based on user interactions and the result of similarity searches.
     if (user_session.get("variable_request")) != "":
         continuation = user_session.get("variable_request_continuation")
         user_session.get("variable_storage").add(
@@ -322,6 +323,16 @@ async def run(message: cl.Message):
                 await msg.send()
         else:
             continuation = user_session.get("fallback_intent")
+            # This occurs when the first message is not found
+            if not continuation:
+                first_message = vectordb.get(where={
+                    "$and": [
+                        {"character_id": int(df_character.id.iloc[0])},
+                        {"context_name": user_session.get("context_state")}
+                    ]
+                })["metadatas"][0]
+                continuation = first_message["fallback"]  # set to the fallback of the first message
+                logger.info(f"First message fallback set: {continuation}")
 
     while continuation != "":
         logger.info(f"Continuation value: {continuation}")
