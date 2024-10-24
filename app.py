@@ -33,6 +33,7 @@ def load_documents(df, page_content_column: str):
         if not doc.metadata.get(page_content_column):
             # Add or update the page_content_column in metadata
             doc.metadata[page_content_column] = doc.page_content
+        doc.metadata["character_id"] = df["character_id"].iloc[0]
     return documents
 
 
@@ -44,9 +45,20 @@ def init_embedding_function():
 # Initialize a Vector DB using Chroma. Store and retrieve embeddings of dialogue utterances for efficient similarity
 # search. It provides ability to match user input to the most relevant response based on contextual similarity.
 def load_vectordb(init: bool = False):
+    from langchain.indexes import SQLRecordManager, index
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
+    RECORD_DB = "record_manager_cache.db" 
     df_character = user_session.get("current_character")
+    character_id = int(df_character.id.iloc[0])
+
+    # Initialize the record manager (using SQLite to store document metadata)
+    record_manager = SQLRecordManager(
+        namespace=f"chroma/{character_id}",
+        db_url=f"sqlite:///{RECORD_DB}"
+    )
+    record_manager.create_schema()
+    
     if not init and vectordb is None:
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
@@ -57,7 +69,9 @@ def load_vectordb(init: bool = False):
             init = True
         else:
             logger.info(f"Vector DB loaded")
+
     if init:
+        # Delete old vectorstore if it exists
         if os.path.exists(VECTORDB_FOLDER):
             vectordb = Chroma(
                 embedding_function=init_embedding_function(),
@@ -73,13 +87,22 @@ def load_vectordb(init: bool = False):
                 logger.info(f"No existing Vector DB found for character {df_character.id.iloc[0]}")
         # Load latest data from Postgres DB for the current character
         docs = load_documents(db.load_dialogues(int(df_character.id.iloc[0])), page_content_column="utterance")
-        vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
+        """ vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
             documents=docs,  # Load dialogue utterances
             embedding=init_embedding_function(),  # Initialize embedding function
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
+        ) """
+        # Re-index documents into the vectorstore
+        index(
+            documents=docs,  # List of documents to index
+            vectorstore=vectordb,  # Chroma vectorstore
+            record_manager=record_manager,  # Tracks document writes
+            cleanup="full",  # Cleanup mode to remove stale documents
+            source_id_key="character_id",  # Ensure documents are indexed by character_id
         )
-        logger.info(f"Vector DB initialised")
+        vectordb.persist()
+        logger.info(f"Vector DB initialised for character {character_id}")
     return vectordb
 
 
