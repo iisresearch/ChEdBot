@@ -52,9 +52,8 @@ def load_vectordb(init: bool = False):
     VECTORDB_FOLDER = ".vectordb"
     df_character = user_session.get("current_character")
     character_id = int(df_character.id.iloc[0])
-    last_updated_db = ""
+    last_updated_db = df_character["lastUpdated"].iloc[0] if df_character and df_character["lastUpdated"].iloc[0] else ""
     if os.path.exists(VECTORDB_FOLDER):
-        last_updated_db = df_character["lastUpdated"].iloc[0]
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
             persist_directory=VECTORDB_FOLDER,
