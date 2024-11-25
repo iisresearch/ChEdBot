@@ -12,7 +12,6 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.vectorstores.base import VectorStoreRetriever
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import DataFrameLoader
-from langchain_community.vectorstores.utils import filter_complex_metadata
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
@@ -34,9 +33,6 @@ def load_documents(df, page_content_column: str):
         if not doc.metadata.get(page_content_column):
             # Add or update the page_content_column in metadata
             doc.metadata[page_content_column] = doc.page_content
-            # Handle timestamp metadata
-            time_stamp = doc.metadata.get("character_last_update")
-            doc.metadata["character_last_update"] = str(time_stamp) if time_stamp else ""
     return documents
 
 
@@ -51,44 +47,34 @@ def load_vectordb(init: bool = False):
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
     df_character = user_session.get("current_character")
-    character_id = int(df_character.id.iloc[0])
-    last_updated_db = df_character["lastUpdated"].iloc[0]
-    if os.path.exists(VECTORDB_FOLDER):
+    if not init and vectordb is None:
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
         )
-
-    if not init:
-        # Retrieve the lastUpdated value from the vector store
-        last_updated_vector_store = None
-        try:
-            last_updated_docs = vectordb.get(where={"character_id": int(character_id)})
-            if last_updated_docs and last_updated_docs["metadatas"][0]["character_last_update"]:
-                last_updated_vector_store = last_updated_docs["metadatas"][0]["character_last_update"]
-        except Exception as e:
-            logger.error(f"Error retrieving lastUpdated from vector store: {e}")
-
-        if last_updated_vector_store != str(last_updated_db):
-            logger.info("lastUpdated value has changed, re-initializing vector store")
+        if not vectordb.get()["ids"]:
             init = True
         else:
-            logger.info(f"Vector DB loaded, lastUpdated matches")
-
+            logger.info(f"Vector DB loaded")
     if init:
-        if os.path.exists(VECTORDB_FOLDER) and vectordb:
-            character_docs = vectordb.get(where={"character_id": int(character_id)})
+        if os.path.exists(VECTORDB_FOLDER):
+            vectordb = Chroma(
+                embedding_function=init_embedding_function(),
+                persist_directory=VECTORDB_FOLDER,
+                client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
+            )
+            character_docs = vectordb.get(where={"character_id": int(df_character.id.iloc[0])})
             logger.info(f"Character docs: {character_docs}")
             if character_docs.get("ids"):
                 vectordb.delete(character_docs.get("ids"))
-                logger.info(f"Deleted existing Vector DB for character {character_id}")
+                logger.info(f"Deleted existing Vector DB for character {df_character.id.iloc[0]}")
             else:
-                logger.info(f"No existing Vector DB found for character {character_id}")
+                logger.info(f"No existing Vector DB found for character {df_character.id.iloc[0]}")
         # Load latest data from Postgres DB for the current character
-        docs = load_documents(db.load_dialogues(int(character_id)), page_content_column="utterance")
+        docs = load_documents(db.load_dialogues(int(df_character.id.iloc[0])), page_content_column="utterance")
         vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
-            documents=filter_complex_metadata(docs),  # Load dialogue utterances
+            documents=docs,  # Load dialogue utterances
             embedding=init_embedding_function(),  # Initialize embedding function
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
@@ -180,7 +166,7 @@ async def start():
         logger.error(
             "No available characters found in df_character. Please check the Postgres DB for the 'Character' table.")
         return
-    load_vectordb()
+    load_vectordb(True)
 
     await set_character()
 
