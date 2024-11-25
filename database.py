@@ -2,9 +2,10 @@
 import logging
 import os
 
-import pandas as pd
 import psycopg2
+from dotenv import load_dotenv
 
+load_dotenv()
 
 def connect_to_postgres():
     try:
@@ -51,7 +52,7 @@ def load_dialogues(character_id):
         SELECT message.*, context.name as context_name, character.id as character_id, character.name as character_name, 
         character.description as character_description, character.title as character_title, 
         character."chatbotUrl" as "character_chatbotUrl", character."gameId" as "character_gameId", character.history as "character_history",
-        character.title as character_title, character.description as character_description
+        character.title as character_title, character.description as character_description, character."lastUpdated" as character_last_update
         FROM character
         INNER JOIN context ON character.id = context."characterId"
         INNER JOIN message ON context.id = message."contextId"
@@ -67,4 +68,16 @@ def load_dialogues(character_id):
 def load_persona(df_character):
     return df_character
     # return pd.read_excel(os.environ["CHEDBOT_SHEET"], header=0, keep_default_na=False, sheet_name="Persona")
+
+if __name__ == "__main__":
+    from IPython.display import display
+    import pandas as pd
+    connection = connect_to_postgres()
+    character_id = 207
+    df_character = load_character(character_id)
+    df = pd.DataFrame(df_character)
+    pd.set_option('display.max_columns', None)
+    display(df)
+
+
 
