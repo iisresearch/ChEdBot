@@ -11,6 +11,7 @@ openai
 openpyxl
 tiktoken
 SQLAlchemy # for postgres
+psycopg2 # for postgres
 langchainhub
 #youtube-transcript-api
 
