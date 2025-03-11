@@ -42,12 +42,33 @@ def init_embedding_function():
     return AzureOpenAIEmbeddings(azure_deployment="text-embedding-ada-002")
 
 
+#
+def last_updated_reload_vectordb(_df_character, _vectordb):
+    """Check if the Vector DB is outdated and needs to be refreshed
+    :return bool: True if the Vector DB is outdated False otherwise
+    """
+    # Compare lastUpdated from Postgres DB with the lastUpdated from Vector DB
+    db_last_updated = _df_character["lastUpdated"].iloc[0]
+    chroma_data = _vectordb.get(where={"character_id": int(_df_character.id.iloc[0])})
+    # Assume each result has a 'lastUpdated' key in its metadata
+    if chroma_data["metadatas"]:
+        chroma_last_updated = chroma_data["metadatas"][0].get("lastUpdated", None)
+        if chroma_last_updated is None or db_last_updated > chroma_last_updated:
+            # Refresh or update the vector store if needed
+            print("Vector store is outdated and should be refreshed.")
+            return True
+    return False
+
 # Initialize a Vector DB using Chroma. Store and retrieve embeddings of dialogue utterances for efficient similarity
 # search. It provides ability to match user input to the most relevant response based on contextual similarity.
 def load_vectordb(init: bool = False):
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
     df_character = user_session.get("current_character")
+    # Check if the Vector DB is outdated and needs to be refreshed
+    if vectordb and init is False:
+        init = last_updated_reload_vectordb(df_character, vectordb)
+
     if not init or vectordb is None:
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
