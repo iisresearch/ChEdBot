@@ -15,7 +15,7 @@ def connect_to_postgres():
         )
         engine = sqlalchemy.create_engine(database_uri)
         connection = engine.connect()
-    except (sqlalchemy.DatabaseError, Exception) as error:
+    except Exception as error:
         logging.error(f"Postgres DB error:  {error}")
         raise error
     return connection
