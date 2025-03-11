@@ -48,10 +48,10 @@ def load_vectordb(init: bool = False):
     global vectordb
     VECTORDB_FOLDER = ".vectordb"
     df_character = user_session.get("current_character")
-    if not init and vectordb is None:
+    if not init or vectordb is None:
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
-            persist_directory=VECTORDB_FOLDER,
+            # persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
         )
         if not vectordb.get()["ids"]:
@@ -62,7 +62,7 @@ def load_vectordb(init: bool = False):
         if os.path.exists(VECTORDB_FOLDER):
             vectordb = Chroma(
                 embedding_function=init_embedding_function(),
-                persist_directory=VECTORDB_FOLDER,
+                # persist_directory=VECTORDB_FOLDER,
                 client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
             )
             character_docs = vectordb.get(where={"character_id": int(df_character.id.iloc[0])})
@@ -78,7 +78,7 @@ def load_vectordb(init: bool = False):
         vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
             documents=filtered_docs,  # Load dialogue utterances
             embedding=init_embedding_function(),  # Initialize embedding function
-            persist_directory=VECTORDB_FOLDER,
+            # persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
         )
         logger.info(f"Vector DB initialised")
@@ -243,7 +243,8 @@ async def set_character():
 @cl.on_message
 async def run(message: cl.Message):
     message_content = message.content
-    global vectordb
+    if not vectordb:
+        load_vectordb(True)
     if message_content == "/reload":
         load_vectordb(True)
         return await cl.Message(content="Data loaded").send()
