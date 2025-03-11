@@ -12,6 +12,7 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.vectorstores.base import VectorStoreRetriever
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import DataFrameLoader
+from langchain_community.vectorstores.utils import filter_complex_metadata
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
@@ -73,8 +74,9 @@ def load_vectordb(init: bool = False):
                 logger.info(f"No existing Vector DB found for character {df_character.id.iloc[0]}")
         # Load latest data from Postgres DB for the current character
         docs = load_documents(db.load_dialogues(int(df_character.id.iloc[0])), page_content_column="utterance")
+        filtered_docs = filter_complex_metadata(docs)
         vectordb = Chroma.from_documents(  # Create a new Vector DB from the loaded documents
-            documents=docs,  # Load dialogue utterances
+            documents=filtered_docs,  # Load dialogue utterances
             embedding=init_embedding_function(),  # Initialize embedding function
             persist_directory=VECTORDB_FOLDER,
             client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
@@ -268,7 +270,7 @@ async def run(message: cl.Message):
             user_session.get("score_threshold"),
             vectordb,
         )
-        document = retriever.get_relevant_documents(query=message_content)
+        document = retriever.invoke(input=message_content)
         logging.info(f"Retrieved documents: {document}")
 
         if len(document) == 1:

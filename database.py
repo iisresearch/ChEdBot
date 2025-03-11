@@ -3,18 +3,19 @@ import logging
 import os
 
 import pandas as pd
-import psycopg2
+import sqlalchemy
 
 
 def connect_to_postgres():
     try:
-        connection = psycopg2.connect(
-            host=os.getenv("POSTGRES_HOST"),
-            database=os.getenv("POSTGRES_DB"),
-            user=os.getenv("POSTGRES_USER"),
-            password=os.getenv("POSTGRES_PASSWORD"),
+        database_uri = (
+            f"postgresql://{os.getenv('POSTGRES_USER')}:"
+            f"{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_HOST')}/"
+            f"{os.getenv('POSTGRES_DB')}"
         )
-    except (psycopg2.DatabaseError, Exception) as error:
+        engine = sqlalchemy.create_engine(database_uri)
+        connection = engine.connect()
+    except (sqlalchemy.DatabaseError, Exception) as error:
         logging.error(f"Postgres DB error:  {error}")
         raise error
     return connection
@@ -38,7 +39,7 @@ def load_contexts(character_id):
     query = f"""
         SELECT * FROM context 
         WHERE "characterId" = {character_id} 
-        ORDER BY id ASC ;"""
+        ORDER BY id ;"""
     df_contexts = pd.read_sql_query(query, connection)
     connection.close()
     return df_contexts
@@ -56,7 +57,7 @@ def load_dialogues(character_id):
         INNER JOIN context ON character.id = context."characterId"
         INNER JOIN message ON context.id = message."contextId"
         WHERE character.id = {character_id}
-        ORDER BY message.intent ASC
+        ORDER BY message.intent
         """
     df_messages = pd.read_sql_query(query, connection)
     connection.close()

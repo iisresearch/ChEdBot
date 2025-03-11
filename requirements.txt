@@ -10,7 +10,8 @@ langchain-openai
 openai
 openpyxl
 tiktoken
-psycopg2 # for postgres
-
+SQLAlchemy # for postgres
 langchainhub
 #youtube-transcript-api
+
+
