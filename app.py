@@ -193,7 +193,6 @@ async def start():
     await set_character()
 
 
-@cl.step
 async def set_character():
     df_character = user_session.get("current_character")
     # user_session.set("context_state", df_character.loc[df_character["Agent"] == user_session.get("current_character"), "Context"].iloc[0])
