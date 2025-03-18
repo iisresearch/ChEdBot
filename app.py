@@ -188,7 +188,7 @@ async def start():
         logger.error(
             "No available characters found in df_character. Please check the Postgres DB for the 'Character' table.")
         return
-    load_vectordb()
+    load_vectordb(True)
 
     await set_character()
 
