@@ -73,26 +73,25 @@ def load_vectordb(init: bool = False):
         vectordb = Chroma(
             embedding_function=init_embedding_function(),
             # persist_directory=VECTORDB_FOLDER,
-            client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
+            client_settings=Settings(anonymized_telemetry=False, is_persistent=False),
         )
         if not vectordb.get()["ids"]:
             init = True
         else:
             logger.info(f"Vector DB loaded")
     if init:
-        if os.path.exists(VECTORDB_FOLDER):
-            vectordb = Chroma(
-                embedding_function=init_embedding_function(),
-                # persist_directory=VECTORDB_FOLDER,
-                client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
-            )
-            character_docs = vectordb.get(where={"character_id": int(df_character.id.iloc[0])})
-            logger.info(f"Character docs: {character_docs}")
-            if character_docs.get("ids"):
-                vectordb.delete(character_docs.get("ids"))
-                logger.info(f"Deleted existing Vector DB for character {df_character.id.iloc[0]}")
-            else:
-                logger.info(f"No existing Vector DB found for character {df_character.id.iloc[0]}")
+        vectordb = Chroma(
+            embedding_function=init_embedding_function(),
+            # persist_directory=VECTORDB_FOLDER,
+            client_settings=Settings(anonymized_telemetry=False, is_persistent=False),
+        )
+        character_docs = vectordb.get(where={"character_id": int(df_character.id.iloc[0])})
+        logger.info(f"Character docs: {character_docs}")
+        if character_docs.get("ids"):
+            vectordb.delete(character_docs.get("ids"))
+            logger.info(f"Deleted existing Vector DB for character {df_character.id.iloc[0]}")
+        else:
+            logger.info(f"No existing Vector DB found for character {df_character.id.iloc[0]}")
         # Load latest data from Postgres DB for the current character
         docs = load_documents(db.load_dialogues(int(df_character.id.iloc[0])), page_content_column="utterance")
         filtered_docs = filter_complex_metadata(docs)
@@ -100,7 +99,7 @@ def load_vectordb(init: bool = False):
             documents=filtered_docs,  # Load dialogue utterances
             embedding=init_embedding_function(),  # Initialize embedding function
             # persist_directory=VECTORDB_FOLDER,
-            client_settings=Settings(anonymized_telemetry=False, is_persistent=True),
+            client_settings=Settings(anonymized_telemetry=False, is_persistent=False),
         )
         logger.info(f"Vector DB initialised")
     return vectordb
@@ -189,7 +188,7 @@ async def start():
         logger.error(
             "No available characters found in df_character. Please check the Postgres DB for the 'Character' table.")
         return
-    load_vectordb(True)
+    load_vectordb()
 
     await set_character()
 
